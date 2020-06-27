@@ -1,4 +1,4 @@
-package main
+package rq
 
 import (
 	"bufio"
@@ -38,16 +38,16 @@ const (
 	RBRACE
 
 	// Operators
-	PLUS
-	MINUS
-	TIMES
-	DIVIDE
-	LANGLES
-	RANGLES
-	AND
-	OR
-	XOR
-	NOT
+	TPLUS
+	TMINUS
+	TTIMES
+	TDIVIDE
+	TLANGLES
+	TRANGLES
+	TAND
+	TOR
+	TXOR
+	TNOT
 )
 
 var tokenNames = map[Token]string{
@@ -72,16 +72,16 @@ var tokenNames = map[Token]string{
 	RBRACE:   "}",
 	LPAREN:   "(",
 	RPAREN:   ")",
-	PLUS:     "+",
-	MINUS:    "-",
-	TIMES:    "*",
-	DIVIDE:   "/",
-	LANGLES:  "<<",
-	RANGLES:  ">>",
-	AND:      "&",
-	OR:       "|",
-	XOR:      "^",
-	NOT:      "~",
+	TPLUS:    "+",
+	TMINUS:   "-",
+	TTIMES:   "*",
+	TDIVIDE:  "/",
+	TLANGLES: "<<",
+	TRANGLES: ">>",
+	TAND:     "&",
+	TOR:      "|",
+	TXOR:     "^",
+	TNOT:     "~",
 }
 
 // We'll put this EOF rune on the end of everything.
@@ -193,32 +193,32 @@ func (s *Scanner) innerScan() (tok Token, lit string) {
 	case '\n':
 		return NEWLINE, string(ch)
 	case '+':
-		return PLUS, string(ch)
+		return TPLUS, string(ch)
 	case '-':
-		return MINUS, string(ch)
+		return TMINUS, string(ch)
 	case '*':
-		return TIMES, string(ch)
+		return TTIMES, string(ch)
 	case '/':
-		return DIVIDE, string(ch)
+		return TDIVIDE, string(ch)
 	case '&':
-		return AND, string(ch)
+		return TAND, string(ch)
 	case '|':
-		return OR, string(ch)
+		return TOR, string(ch)
 	case '^':
-		return XOR, string(ch)
+		return TXOR, string(ch)
 	case '~':
-		return NOT, string(ch)
+		return TNOT, string(ch)
 	case '<':
 		next := s.read()
 		if next == '<' {
-			return LANGLES, "<<"
+			return TLANGLES, "<<"
 		} else {
 			return ILLEGAL, string(ch) + string(next)
 		}
 	case '>':
 		next := s.read()
 		if next == '>' {
-			return RANGLES, ">>"
+			return TRANGLES, ">>"
 		} else {
 			return ILLEGAL, string(ch) + string(next)
 		}

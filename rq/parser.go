@@ -1,13 +1,15 @@
-package main
+package rq
 
 import (
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/shepheb/drasm/core"
 )
 
-type Parser struct {
+type parser struct {
 	s   *Scanner
 	buf struct {
 		tok Token  // Last read token.
@@ -17,13 +19,13 @@ type Parser struct {
 }
 
 // NewParser returns a new Parser instance.
-func NewParser(filename string, r io.Reader) *Parser {
-	return &Parser{s: NewScanner(filename, r)}
+func newParser(filename string, r io.Reader) *parser {
+	return &parser{s: NewScanner(filename, r)}
 }
 
 // scan returns the next token from the underlying scanner.
 // If a token has been unscanned then read that instead.
-func (p *Parser) scan() (Token, string) {
+func (p *parser) scan() (Token, string) {
 	// If we have a token on the buffer, then return it.
 	if p.buf.n != 0 {
 		p.buf.n = 0
@@ -39,13 +41,13 @@ func (p *Parser) scan() (Token, string) {
 }
 
 // Unscan pushes previously read token back onto the buffer.
-func (p *Parser) unscan() {
+func (p *parser) unscan() {
 	p.buf.n = 1
 }
 
 // scanIgnoreWhitespace is a wrapper that skips whitespace tokens.
 // NEWLINE is not a whitespace token according to this; those are important.
-func (p *Parser) scanIgnoreWhitespace() (Token, string) {
+func (p *parser) scanIgnoreWhitespace() (Token, string) {
 	tok, lit := p.scan()
 	for tok == WS {
 		tok, lit = p.scan()
@@ -53,13 +55,13 @@ func (p *Parser) scanIgnoreWhitespace() (Token, string) {
 	return tok, lit
 }
 
-func (p *Parser) wrapError(e error) error {
+func (p *parser) wrapError(e error) error {
 	return fmt.Errorf("Parse error at %s   %v", p.s.Location(), e)
 }
 
 // Actual top-level parser. Returns our AST object.
-func (p *Parser) Parse() (*AST, error) {
-	lines := make([]Assembled, 0, 256)
+func (p *parser) Parse() (*core.AST, error) {
+	lines := make([]core.Assembled, 0, 256)
 	for {
 		tok, lit := p.scanIgnoreWhitespace()
 		if tok == DOT {
@@ -78,7 +80,7 @@ func (p *Parser) Parse() (*AST, error) {
 		} else if tok == COLON { // Label definition
 			tok, lit = p.scan() // WS not allowed.
 			if tok == IDENT {
-				lines = append(lines, &LabelDef{lit})
+				lines = append(lines, core.DefineLabel(lit))
 			} else {
 				return nil, p.wrapError(fmt.Errorf("Bad label: '%s'", lit))
 			}
@@ -90,10 +92,10 @@ func (p *Parser) Parse() (*AST, error) {
 			return nil, p.wrapError(fmt.Errorf("Unexpected %s", tokenNames[tok]))
 		}
 	}
-	return &AST{lines}, nil
+	return &core.AST{Lines: lines}, nil
 }
 
-func (p *Parser) parseDirective() (Assembled, error) {
+func (p *parser) parseDirective() (core.Assembled, error) {
 	dir, lit := p.scan() // No whitespace after the .
 	if dir != IDENT {
 		return nil, fmt.Errorf("Expected directive command after dot, but found %s", tokenNames[dir])
@@ -110,7 +112,7 @@ func (p *Parser) parseDirective() (Assembled, error) {
 			t, lit := p.scanIgnoreWhitespace()
 			return nil, fmt.Errorf("Unexpected %s '%s' at end of DAT", tokenNames[t], lit)
 		}
-		return &DatBlock{args}, nil
+		return &core.DatBlock{Values: args}, nil
 
 	case "ORG":
 		expr, err := p.parseSimpleExpr()
@@ -121,7 +123,7 @@ func (p *Parser) parseDirective() (Assembled, error) {
 			t, lit := p.scanIgnoreWhitespace()
 			return nil, fmt.Errorf("Unexpected %s '%s' at end of ORG", tokenNames[t], lit)
 		}
-		return &Org{expr}, nil
+		return &core.Org{Abs: expr}, nil
 
 	case "FILL":
 		values, err := p.parseExprList(false /* no strings */)
@@ -135,7 +137,7 @@ func (p *Parser) parseDirective() (Assembled, error) {
 			t, lit := p.scanIgnoreWhitespace()
 			return nil, fmt.Errorf("Unexpected %s '%s' at end of FILL", tokenNames[t], lit)
 		}
-		return &FillBlock{values[1], values[0]}, nil
+		return &core.FillBlock{Length: values[1], Value: values[0]}, nil
 
 	case "RESERVE":
 		loc := p.s.Location()
@@ -147,7 +149,10 @@ func (p *Parser) parseDirective() (Assembled, error) {
 			t, lit := p.scanIgnoreWhitespace()
 			return nil, fmt.Errorf("Unexpected %s '%s' at end of RESERVE", tokenNames[t], lit)
 		}
-		return &FillBlock{&Constant{0, loc}, expr}, nil
+		return &core.FillBlock{
+			Value:  &core.Constant{Value: 0, Loc: loc},
+			Length: expr,
+		}, nil
 
 	case "DEFINE":
 		t, lit := p.scanIgnoreWhitespace()
@@ -167,7 +172,7 @@ func (p *Parser) parseDirective() (Assembled, error) {
 			t, lit := p.scanIgnoreWhitespace()
 			return nil, fmt.Errorf("Unexpected %s '%s' at end of DEFINE", tokenNames[t], lit)
 		}
-		return &SymbolDef{lit, expr}, nil
+		return core.DefineSymbol(lit, expr), nil
 
 		// TODO: Macros
 	}
@@ -186,10 +191,10 @@ func (p *Parser) parseDirective() (Assembled, error) {
 // mulOp := * / & << >>
 // addOp := + - | ^
 // unaryOp := - ~
-func (p *Parser) parseOperatorChain(parseSubExpr func(p *Parser) (Expression, error), parseOperator func(p *Parser) (Token, error)) (Expression, error) {
+func (p *parser) parseOperatorChain(parseSubExpr func(p *parser) (core.Expression, error), parseOperator func(p *parser) (core.Operator, error)) (core.Expression, error) {
 	// We parse a loop of subexpressions, separated by ops.
-	exprs := make([]Expression, 0, 2)
-	ops := make([]Token, 0, 2)
+	exprs := make([]core.Expression, 0, 2)
+	ops := make([]core.Operator, 0, 2)
 
 	for {
 		e, err := parseSubExpr(p)
@@ -215,52 +220,72 @@ func (p *Parser) parseOperatorChain(parseSubExpr func(p *Parser) (Expression, er
 	// order.
 	final := exprs[0]
 	for i, op := range ops {
-		final = &BinExpr{final, op, exprs[i+1]}
+		final = core.Binary(final, op, exprs[i+1])
 	}
 	return final, nil
 }
 
-func (p *Parser) parseSimpleExpr() (Expression, error) {
+func (p *parser) parseSimpleExpr() (core.Expression, error) {
 	return p.parseOperatorChain(parseMulExpr, parseAddOp)
 }
 
-func parseMulExpr(p *Parser) (Expression, error) {
+func parseMulExpr(p *parser) (core.Expression, error) {
 	return p.parseOperatorChain(parseUnaryExpr, parseMulOp)
 }
 
-func parseAddOp(p *Parser) (Token, error) {
+func parseAddOp(p *parser) (core.Operator, error) {
 	tok, _ := p.scanIgnoreWhitespace()
 	switch tok {
-	case PLUS, MINUS, OR, XOR:
-		return tok, nil
+	case TPLUS:
+		return core.PLUS, nil
+	case TMINUS:
+		return core.MINUS, nil
+	case TOR:
+		return core.OR, nil
+	case TXOR:
+		return core.XOR, nil
 	default:
 		p.unscan()
-		return ILLEGAL, fmt.Errorf("Found non-additive operator %s at %s", tokenNames[tok], p.s.Location())
+		return core.ILLEGAL, fmt.Errorf("Found non-additive operator %s at %s", tokenNames[tok], p.s.Location())
 	}
 }
 
-func parseMulOp(p *Parser) (Token, error) {
+func parseMulOp(p *parser) (core.Operator, error) {
 	tok, _ := p.scanIgnoreWhitespace()
 	switch tok {
-	case TIMES, DIVIDE, AND:
-		return tok, nil
+	case TTIMES:
+		return core.TIMES, nil
+	case TDIVIDE:
+		return core.DIVIDE, nil
+	case TAND:
+		return core.AND, nil
 	default:
 		p.unscan()
-		return ILLEGAL, fmt.Errorf("Found non-multiplicative operator %s at %s", tokenNames[tok], p.s.Location())
+		return core.ILLEGAL, fmt.Errorf("Found non-multiplicative operator %s at %s", tokenNames[tok], p.s.Location())
 	}
 }
 
-func parseUnaryExpr(p *Parser) (Expression, error) {
+func parseUnaryExpr(p *parser) (core.Expression, error) {
 	// 0 or more unary expressions on the front.
-	ops := make([]Token, 0, 2)
+	ops := make([]core.Operator, 0, 2)
 	for {
 		fmt.Printf("PUE loop\n")
 		tok, _ := p.scanIgnoreWhitespace()
-		if tok == PLUS || tok == MINUS || tok == NOT {
-			ops = append(ops, tok)
-		} else {
+		op := core.ILLEGAL
+		switch tok {
+		case TPLUS:
+			op = core.PLUS
+		case TMINUS:
+			op = core.MINUS
+		case TNOT:
+			op = core.NOT
+		}
+
+		if op == core.ILLEGAL {
 			p.unscan()
 			break
+		} else {
+			ops = append(ops, op)
 		}
 	}
 
@@ -272,26 +297,26 @@ func parseUnaryExpr(p *Parser) (Expression, error) {
 	}
 
 	for i := len(ops) - 1; i >= 0; i-- {
-		e = &UnaryExpr{ops[i], e}
+		e = core.Unary(ops[i], e)
 	}
 
 	return e, nil
 }
 
-func (p *Parser) parseTerm() (Expression, error) {
+func (p *parser) parseTerm() (core.Expression, error) {
 	// Parse a simple term in the expression: a literal, an identifier, or a
 	// bracketed subexpression.
 	loc := p.s.Location()
 	tok, lit := p.scanIgnoreWhitespace()
 	switch tok {
 	case IDENT:
-		return &LabelUse{lit, loc}, nil
+		return core.UseLabel(lit, loc), nil
 	case NUMBER:
 		n, err := strconv.ParseInt(lit, 0, 0)
 		if err != nil {
 			return nil, err
 		}
-		return &Constant{uint16(n), loc}, nil
+		return &core.Constant{Value: uint16(n), Loc: loc}, nil
 	case LPAREN:
 		subexpr, err := p.parseSimpleExpr()
 		if err != nil {
@@ -307,14 +332,14 @@ func (p *Parser) parseTerm() (Expression, error) {
 	return nil, fmt.Errorf("Found %s while parsing expression", tokenNames[tok])
 }
 
-func (p *Parser) parseExpr() ([]Expression, error) {
+func (p *parser) parseExpr() ([]core.Expression, error) {
 	// Either a string literal or a simple expression.
 	loc := p.s.Location()
 	tok, lit := p.scanIgnoreWhitespace()
 	if tok == STRING {
-		b := make([]Expression, len(lit))
+		b := make([]core.Expression, len(lit))
 		for i, c := range lit {
-			b[i] = &Constant{uint16(c), loc}
+			b[i] = &core.Constant{Value: uint16(c), Loc: loc}
 		}
 		return b, nil
 	}
@@ -325,13 +350,13 @@ func (p *Parser) parseExpr() ([]Expression, error) {
 	if err != nil {
 		return nil, err
 	}
-	buf := make([]Expression, 1)
+	buf := make([]core.Expression, 1)
 	buf[0] = expr
 	return buf, nil
 }
 
-func (p *Parser) parseExprList(allowStringLiterals bool) ([]Expression, error) {
-	buf := make([]Expression, 0, 16)
+func (p *parser) parseExprList(allowStringLiterals bool) ([]core.Expression, error) {
+	buf := make([]core.Expression, 0, 16)
 	for {
 		if allowStringLiterals {
 			exprs, err := p.parseExpr()
@@ -361,7 +386,7 @@ func (p *Parser) parseExprList(allowStringLiterals bool) ([]Expression, error) {
 }
 
 // Returns false if we can't find that token next.
-func (p *Parser) consume(t Token) bool {
+func (p *parser) consume(t Token) bool {
 	tok, _ := p.scanIgnoreWhitespace()
 	if tok != t {
 		p.unscan()
@@ -369,12 +394,12 @@ func (p *Parser) consume(t Token) bool {
 	return tok == t
 }
 
-func (p *Parser) consumeComma() bool {
+func (p *parser) consumeComma() bool {
 	return p.consume(COMMA)
 }
 
 // Instruction parsing.
-func (p *Parser) parseInstruction(opcode string) (Assembled, error) {
+func (p *parser) parseInstruction(opcode string) (core.Assembled, error) {
 	// Special case for PUSH, POP, LDMIA, STMIA, LDR and STR.
 	// They have their own rules for bracketing.
 	if opcode == "PUSH" || opcode == "POP" {
@@ -392,25 +417,25 @@ func (p *Parser) parseInstruction(opcode string) (Assembled, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to parse argument list: %v", err)
 	}
-	return &Instruction{opcode, args, p.s.Location()}, nil
+	return &instruction{opcode, args, p.s.Location()}, nil
 }
 
-func (p *Parser) parseArgList(opcode string) ([]*Arg, error) {
-	args := make([]*Arg, 0, 3)
+func (p *parser) parseArgList(opcode string) ([]*arg, error) {
+	args := make([]*arg, 0, 3)
 
 	for {
 		// Parse an arg. Register, PC, SP, literal, label expression.
 		done := false
 		r, err := p.parseReg()
 		if err == nil {
-			args = append(args, &Arg{kind: AT_REG, reg: r})
+			args = append(args, &arg{kind: atReg, reg: r})
 			done = true
 		}
 
 		if !done {
 			lit, err := p.parseLiteral()
 			if err == nil {
-				args = append(args, &Arg{kind: AT_LITERAL, lit: lit})
+				args = append(args, &arg{kind: atLiteral, lit: lit})
 				done = true
 			}
 		}
@@ -418,7 +443,7 @@ func (p *Parser) parseArgList(opcode string) ([]*Arg, error) {
 		if !done {
 			expression, err := p.parseSimpleExpr()
 			if err == nil {
-				args = append(args, &Arg{kind: AT_LABEL, label: expression})
+				args = append(args, &arg{kind: atLabel, label: expression})
 				done = true
 			}
 		}
@@ -426,9 +451,9 @@ func (p *Parser) parseArgList(opcode string) ([]*Arg, error) {
 		if !done {
 			t, _ := p.scanIgnoreWhitespace()
 			if t == PC {
-				args = append(args, &Arg{kind: AT_PC})
+				args = append(args, &arg{kind: atPC})
 			} else if t == SP {
-				args = append(args, &Arg{kind: AT_SP})
+				args = append(args, &arg{kind: atSP})
 			} else if t == NEWLINE || t == EOF {
 				break
 			} else {
@@ -449,7 +474,7 @@ func (p *Parser) parseArgList(opcode string) ([]*Arg, error) {
 	return args, nil
 }
 
-func (p *Parser) parsePushPop(opcode string) (Assembled, error) {
+func (p *parser) parsePushPop(opcode string) (core.Assembled, error) {
 	regs, lrpc, err := p.parseRlist(opcode, true)
 	if err != nil {
 		return nil, fmt.Errorf("Error parsing register list for %s: %v", opcode, err)
@@ -458,10 +483,10 @@ func (p *Parser) parsePushPop(opcode string) (Assembled, error) {
 	if t != NEWLINE {
 		return nil, fmt.Errorf("Unexpected %s at end of %s", tokenNames[t], opcode)
 	}
-	return &StackOp{regs, opcode == "PUSH", lrpc, 0xffff}, nil
+	return &stackOp{regs, opcode == "PUSH", lrpc, 0xffff}, nil
 }
 
-func (p *Parser) parseMultiStoreLoad(opcode string) (Assembled, error) {
+func (p *parser) parseMultiStoreLoad(opcode string) (core.Assembled, error) {
 	base, err := p.parseReg()
 	if err != nil {
 		return nil, fmt.Errorf("Failed to parse base register of %s: %v", opcode, err)
@@ -482,12 +507,12 @@ func (p *Parser) parseMultiStoreLoad(opcode string) (Assembled, error) {
 
 	t, _ := p.scanIgnoreWhitespace()
 	if t != NEWLINE {
-		return nil, fmt.Errorf("Unexpected %s at end of line", tokenNames[t], opcode)
+		return nil, fmt.Errorf("Unexpected %s at end of line", tokenNames[t])
 	}
-	return &StackOp{regs, opcode == "STMIA", false, base}, nil
+	return &stackOp{regs, opcode == "STMIA", false, base}, nil
 }
 
-func (p *Parser) parseReg() (uint16, error) {
+func (p *parser) parseReg() (uint16, error) {
 	t, lit := p.scanIgnoreWhitespace()
 	if t == REGISTER {
 		r, err := strconv.Atoi(lit[1:])
@@ -500,7 +525,7 @@ func (p *Parser) parseReg() (uint16, error) {
 	return 0, fmt.Errorf("Expected register, but found %s", tokenNames[t])
 }
 
-func (p *Parser) parseRlist(opcode string, pclrAllowed bool) (uint16, bool, error) {
+func (p *parser) parseRlist(opcode string, pclrAllowed bool) (uint16, bool, error) {
 	var regs uint16
 	var pclr bool
 
@@ -541,14 +566,14 @@ func (p *Parser) parseRlist(opcode string, pclrAllowed bool) (uint16, bool, erro
 	}
 }
 
-func (p *Parser) parseLiteral() (Expression, error) {
+func (p *parser) parseLiteral() (core.Expression, error) {
 	if !p.consume(HASH) {
 		return nil, fmt.Errorf("Failed to parse # for literal")
 	}
 	return p.parseSimpleExpr()
 }
 
-func (p *Parser) parseLoadStore(opcode string) (Assembled, error) {
+func (p *parser) parseLoadStore(opcode string) (core.Assembled, error) {
 	// Always a base register, comma, and square brackets.
 	// But it's one of a few possibilities:
 	// [Rb]
@@ -599,50 +624,50 @@ func (p *Parser) parseLoadStore(opcode string) (Assembled, error) {
 			return nil, fmt.Errorf("Unexpected %s at end of %s", tokenNames[t], opcode)
 		}
 
-		return &LoadStore{opcode == "STR", dest, 0xffff, lit, 0xffff, nil}, nil
-	} else {
-		// Regular register.
-		p.unscan()
-		base, err := p.parseReg()
-
-		out := &LoadStore{opcode == "STR", dest, base, nil, 0xffff, nil}
-
-		// Next is a comma or ].
-		t, _ := p.scanIgnoreWhitespace()
-		if t == COMMA {
-			// Try to parse a literal.
-			out.preLit, err = p.parseLiteral()
-			if err != nil {
-				out.preReg, err = p.parseReg()
-				if err != nil {
-					return nil, fmt.Errorf("Expected pre-indexed value, but failed to parse.")
-				}
-			}
-
-			if !p.consume(RBRAC) {
-				return nil, fmt.Errorf("Expected closing ] after base register")
-			}
-		} else if t != RBRAC {
-			return nil, fmt.Errorf("Expected comma or ] after base register")
-		}
-
-		// Next is a comma or EOL.
-		t, _ = p.scanIgnoreWhitespace()
-		if t == COMMA {
-			// post-incrementing is real.
-			out.postLit, err = p.parseLiteral()
-			if err != nil {
-				return nil, fmt.Errorf("Expected literal for post-increment: %v", err)
-			}
-		} else {
-			p.unscan()
-		}
-
-		t, _ = p.scanIgnoreWhitespace()
-		if t != NEWLINE {
-			return nil, fmt.Errorf("Unexpected %s at end of %s", tokenNames[t], opcode)
-		}
-
-		return out, nil
+		return &loadStore{opcode == "STR", dest, 0xffff, lit, 0xffff, nil}, nil
 	}
+
+	// Regular register.
+	p.unscan()
+	base, err := p.parseReg()
+
+	out := &loadStore{opcode == "STR", dest, base, nil, 0xffff, nil}
+
+	// Next is a comma or ].
+	t, _ = p.scanIgnoreWhitespace()
+	if t == COMMA {
+		// Try to parse a literal.
+		out.preLit, err = p.parseLiteral()
+		if err != nil {
+			out.preReg, err = p.parseReg()
+			if err != nil {
+				return nil, fmt.Errorf("expected pre-indexed value, but failed to parse")
+			}
+		}
+
+		if !p.consume(RBRAC) {
+			return nil, fmt.Errorf("Expected closing ] after base register")
+		}
+	} else if t != RBRAC {
+		return nil, fmt.Errorf("Expected comma or ] after base register")
+	}
+
+	// Next is a comma or EOL.
+	t, _ = p.scanIgnoreWhitespace()
+	if t == COMMA {
+		// post-incrementing is real.
+		out.postLit, err = p.parseLiteral()
+		if err != nil {
+			return nil, fmt.Errorf("Expected literal for post-increment: %v", err)
+		}
+	} else {
+		p.unscan()
+	}
+
+	t, _ = p.scanIgnoreWhitespace()
+	if t != NEWLINE {
+		return nil, fmt.Errorf("Unexpected %s at end of %s", tokenNames[t], opcode)
+	}
+
+	return out, nil
 }
