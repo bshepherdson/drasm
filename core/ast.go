@@ -3,6 +3,8 @@ package core
 import (
 	"fmt"
 	"os"
+
+	"github.com/shepheb/psec"
 )
 
 // AST captures a complete syntax tree for an assembled file.
@@ -14,19 +16,20 @@ type AST struct {
 // messages.
 type Expression interface {
 	Evaluate(s *AssemblyState) uint16
-	Location() string
+	Location() *psec.Loc
+	Equals(expr Expression) bool
 }
 
 // LabelUse is a kind of expression.
 // It might be a real label, or a define.
 type LabelUse struct {
 	label string
-	loc   string
+	loc   *psec.Loc
 }
 
 // UseLabel constructs a LabelUse AST node for where a label is used.
-func UseLabel(label, loc string) *LabelUse {
-	return &LabelUse{label, loc}
+func UseLabel(label string, loc *psec.Loc) *LabelUse {
+	return &LabelUse{label: label, loc: loc}
 }
 
 // Evaluate resolves the value of a label when it appears in an expression.
@@ -40,19 +43,31 @@ func (l *LabelUse) Evaluate(s *AssemblyState) uint16 {
 }
 
 // Location for a LabelUse
-func (l *LabelUse) Location() string { return l.loc }
+func (l *LabelUse) Location() *psec.Loc { return l.loc }
+
+// Equals for LabelUse
+func (l *LabelUse) Equals(expr Expression) bool {
+	l2, ok := expr.(*LabelUse)
+	return ok && l.label == l2.label
+}
 
 // Constant is a fixed-value Expression.
 type Constant struct {
 	Value uint16
-	Loc   string
+	Loc   *psec.Loc
 }
 
 // Evaluate for Constant: return the value.
 func (c *Constant) Evaluate(s *AssemblyState) uint16 { return c.Value }
 
 // Location for Constant
-func (c *Constant) Location() string { return c.Loc }
+func (c *Constant) Location() *psec.Loc { return c.Loc }
+
+// Equals for Constant
+func (c *Constant) Equals(expr Expression) bool {
+	c2, ok := expr.(*Constant)
+	return ok && c.Value == c2.Value
+}
 
 // BinExpr represents a binary express, such as addition.
 type BinExpr struct {
@@ -92,8 +107,15 @@ func (b *BinExpr) Evaluate(s *AssemblyState) uint16 {
 }
 
 // Location for BinExpr
-func (b *BinExpr) Location() string {
+func (b *BinExpr) Location() *psec.Loc {
 	return b.lhs.Location()
+}
+
+// Equals for BinExpr
+func (b *BinExpr) Equals(expr Expression) bool {
+	b2, ok := expr.(*BinExpr)
+	return ok && b.lhs.Equals(b2.lhs) && b.rhs.Equals(b2.rhs) &&
+		b.operator == b2.operator
 }
 
 // UnaryExpr captures a unary expression. There aren't as many of these, but
@@ -124,7 +146,13 @@ func (u *UnaryExpr) Evaluate(s *AssemblyState) uint16 {
 }
 
 // Location for UnaryExpr uses the inner expression's location.
-func (u *UnaryExpr) Location() string { return u.expr.Location() }
+func (u *UnaryExpr) Location() *psec.Loc { return u.expr.Location() }
+
+// Equals for UnaryExpr
+func (u *UnaryExpr) Equals(expr Expression) bool {
+	u2, ok := expr.(*UnaryExpr)
+	return ok && u.expr.Equals(u2.expr) && u.operator == u2.operator
+}
 
 // Assembled describes something that can be assembled into the binary,
 // such as an instruction, and some directives.

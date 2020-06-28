@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/shepheb/drasm/core"
+	"github.com/shepheb/psec"
 )
 
 func showArgs(args []*arg) string {
@@ -32,7 +33,7 @@ func showArg(arg *arg) string {
 	}
 }
 
-func opRI(loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
+func opRI(loc *psec.Loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
 	if mnemonic == "MOV" {
 		// Special case for MOV: We can encode it as NEG or as MOV+MVH.
 		value := args[1].lit.Evaluate(s)
@@ -50,23 +51,23 @@ func opRI(loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyStat
 	}
 }
 
-func opRRR(loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
+func opRRR(loc *psec.Loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
 	s.Push(0x8000 | (opcode << 9) | (args[2].reg << 6) | (args[1].reg << 3) | args[0].reg)
 }
 
-func opRR(loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
+func opRR(loc *psec.Loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
 	s.Push(0x8000 | (opcode << 6) | (args[1].reg << 3) | args[0].reg)
 }
 
-func opR(loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
+func opR(loc *psec.Loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
 	s.Push(0x8000 | (opcode << 3) | args[0].reg)
 }
 
-func opVoid(loc, mnemonic string, opcode uint16, s *core.AssemblyState) {
+func opVoid(loc *psec.Loc, mnemonic string, opcode uint16, s *core.AssemblyState) {
 	s.Push(0x8000 | opcode)
 }
 
-func opBranch(loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
+func opBranch(loc *psec.Loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
 	// Convert the argument to an absolute address.
 	target := args[0].label.Evaluate(s)
 	diff := target - (s.Index() + 1)
@@ -81,7 +82,7 @@ func opBranch(loc, mnemonic string, opcode uint16, args []*arg, s *core.Assembly
 	}
 }
 
-func opAddSub(loc, mnemonic string, args []*arg, s *core.AssemblyState) {
+func opAddSub(loc *psec.Loc, mnemonic string, args []*arg, s *core.AssemblyState) {
 	// ADD and SUB both support several argument types: RI, RRR, SP-Imm.
 	// ADD additionally has reg-PC-imm and reg-SP-imm
 	if len(args) == 2 && args[0].kind == atReg && args[1].kind == atLiteral {
@@ -115,7 +116,7 @@ func opAddSub(loc, mnemonic string, args []*arg, s *core.AssemblyState) {
 	}
 }
 
-func opSWI(loc, mnemonic string, args []*arg, s *core.AssemblyState) {
+func opSWI(loc *psec.Loc, mnemonic string, args []*arg, s *core.AssemblyState) {
 	// SWI accepts either a single register or a literal.
 	if len(args) == 1 && args[0].kind == atReg {
 		// 1000000000011ddd

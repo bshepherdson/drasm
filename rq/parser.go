@@ -246,7 +246,7 @@ func parseAddOp(p *parser) (core.Operator, error) {
 		return core.XOR, nil
 	default:
 		p.unscan()
-		return core.ILLEGAL, fmt.Errorf("Found non-additive operator %s at %s", tokenNames[tok], p.s.Location())
+		return core.ILLEGAL, fmt.Errorf("Found non-additive operator %s at %s", tokenNames[tok], p.s.Location().String())
 	}
 }
 
@@ -261,7 +261,7 @@ func parseMulOp(p *parser) (core.Operator, error) {
 		return core.AND, nil
 	default:
 		p.unscan()
-		return core.ILLEGAL, fmt.Errorf("Found non-multiplicative operator %s at %s", tokenNames[tok], p.s.Location())
+		return core.ILLEGAL, fmt.Errorf("Found non-multiplicative operator %s at %s", tokenNames[tok], p.s.Location().String())
 	}
 }
 

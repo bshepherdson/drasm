@@ -19,3 +19,17 @@ const (
 	NOT
 	ILLEGAL
 )
+
+// OperatorNames maps operator name strings to the internal values.
+var OperatorNames map[string]Operator = map[string]Operator{
+	"+":  PLUS,
+	"-":  MINUS,
+	"*":  TIMES,
+	"/":  DIVIDE,
+	"<<": LANGLES,
+	">>": RANGLES,
+	"&":  AND,
+	"|":  OR,
+	"^":  XOR,
+	"~":  NOT,
+}

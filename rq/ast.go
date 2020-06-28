@@ -2,12 +2,13 @@ package rq
 
 import (
 	"github.com/shepheb/drasm/core"
+	"github.com/shepheb/psec"
 )
 
 type instruction struct {
 	opcode string // Should be upcased.
 	args   []*arg
-	loc    string
+	loc    *psec.Loc
 }
 
 // Assemble for top-level Risque-16s instruction.
@@ -242,7 +243,7 @@ var branchInstructions = map[string]uint16{
 	"BLE": 0xf,
 }
 
-var specialInstructions = map[string]func(string, string, []*arg, *core.AssemblyState){
+var specialInstructions = map[string]func(*psec.Loc, string, []*arg, *core.AssemblyState){
 	"ADD": opAddSub,
 	"SUB": opAddSub,
 	"SWI": opSWI,

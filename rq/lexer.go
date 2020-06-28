@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/shepheb/psec"
 )
 
 type Token int
@@ -139,8 +141,8 @@ func (s *Scanner) unread() {
 	s.noCount++ // Avoids double-counting when we re-scan.
 }
 
-func (s *Scanner) Location() string {
-	return fmt.Sprintf("%s:%d:%d", s.file, s.line, s.col)
+func (s *Scanner) Location() *psec.Loc {
+	return &psec.Loc{Filename: s.file, Line: int(s.line), Col: int(s.col)}
 }
 
 func (s *Scanner) Scan() (Token, string) {
