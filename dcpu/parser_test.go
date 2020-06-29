@@ -10,23 +10,27 @@ import (
 
 var dp = buildDcpuParser()
 
+func compareArgs(t *testing.T, exp, act *arg) {
+	if act == nil {
+		t.Errorf("failed to parse arg, got nil")
+	} else if act.reg != exp.reg {
+		t.Errorf("expected arg register %d, got %d", exp.reg, act.reg)
+	} else if act.indirect != exp.indirect {
+		t.Errorf("expected arg to be indirect=%t, got %t", exp.indirect, act.indirect)
+	} else if act.offset != nil && exp.offset != nil && !act.offset.Equals(exp.offset) {
+		t.Errorf("expected arg offset %#v, got %#v", exp.offset, act.offset)
+	} else if act.special != exp.special {
+		t.Errorf("expected special arg %d, got %d", exp.special, act.special)
+	}
+}
+
 func expectArg(t *testing.T, g *psec.Grammar, startSym, input string, exp *arg) {
 	res, err := g.ParseStringWith("test", input, startSym)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 	if r, ok := res.(*arg); ok {
-		if r == nil {
-			t.Errorf("failed to parse arg, got nil")
-		} else if r.reg != exp.reg {
-			t.Errorf("expected arg register %d, got %d", exp.reg, r.reg)
-		} else if r.indirect != exp.indirect {
-			t.Errorf("expected arg to be indirect=%t, got %t", exp.indirect, r.indirect)
-		} else if r.offset != nil && exp.offset != nil && !r.offset.Equals(exp.offset) {
-			t.Errorf("expected arg offset %#v, got %#v", exp.offset, r.offset)
-		} else if r.special != exp.special {
-			t.Errorf("expected special arg %d, got %d", exp.special, r.special)
-		}
+		compareArgs(t, exp, r)
 	} else {
 		t.Errorf("expected *arg value, got %T", res)
 	}
@@ -209,4 +213,58 @@ func TestArg(t *testing.T) {
 		offset: core.Binary(core.UseLabel("foo", locCol(0)), core.XOR,
 			core.Unary(core.NOT, constAt(7, 7))),
 	})
+}
+
+func expectBinOp(t *testing.T, input string, opcode uint16, b, a *arg) {
+	res, err := dp.ParseStringWith("test", input, "binary instruction")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if op, ok := res.(*binaryOp); ok {
+		if op == nil {
+			t.Errorf("failed to parse expression, got nil")
+		} else if op.opcode != opcode {
+			t.Errorf("wrong opcode: expected %d, got %d", opcode, op.opcode)
+		} else {
+			compareArgs(t, a, op.a)
+			compareArgs(t, b, op.b)
+		}
+	} else {
+		t.Errorf("expected *binaryOp, but got %T", res)
+	}
+}
+
+func TestBinaryInstructions(t *testing.T) {
+	expectBinOp(t, "set b, a", 1, &arg{reg: 1}, &arg{reg: 0})
+	expectBinOp(t, "adx [b+3], pop", 0x1a,
+		&arg{reg: 1, indirect: true, offset: constAt(3, 7)},
+		&arg{special: 0x18})
+	expectBinOp(t, "ifg ex   ,pc", 0x14, &arg{special: 0x1d}, &arg{special: 0x1c})
+}
+
+func expectUnaryOp(t *testing.T, input string, opcode uint16, a *arg) {
+	res, err := dp.ParseStringWith("test", input, "unary instruction")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if op, ok := res.(*unaryOp); ok {
+		if op == nil {
+			t.Errorf("failed to parse expression, got nil")
+		} else if op.opcode != opcode {
+			t.Errorf("wrong opcode: expected %d, got %d", opcode, op.opcode)
+		} else {
+			compareArgs(t, a, op.a)
+		}
+	} else {
+		t.Errorf("expected *unaryOp, but got %T", res)
+	}
+}
+
+func TestUnaryInstructions(t *testing.T) {
+	expectUnaryOp(t, "jsr somewhere", 1,
+		&arg{special: 0x1f, offset: core.UseLabel("somewhere", locCol(4))})
+	expectUnaryOp(t, "int 0", 8, &arg{special: 0x1f, offset: constAt(0, 4)})
+	expectUnaryOp(t, "rfi pop", 11, &arg{special: 0x18})
 }

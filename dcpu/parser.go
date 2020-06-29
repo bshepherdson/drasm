@@ -63,7 +63,6 @@ func buildDcpuParser() *psec.Grammar {
 	g.AddSymbol("ws", psec.ManyDrop(psec.OneOf(" \t\r\n")))
 	g.AddSymbol("ws1", psec.Many1(psec.OneOf(" \t\r\n")))
 
-	addArgParsers(g)
 	g.AddSymbol("letterish",
 		psec.Alt(psec.OneOf("$_"), psec.Range('a', 'z'), psec.Range('A', 'Z')))
 	g.WithAction("identifier", psec.Seq(sym("letterish"),
@@ -73,6 +72,12 @@ func buildDcpuParser() *psec.Grammar {
 			return fmt.Sprintf("%c%s", rs[0].(byte), rs[1].(string)), nil
 		})
 
+	addArgParsers(g)
+	addBinaryOpParsers(g)
+	addUnaryOpParsers(g)
+
+	g.AddSymbol("instruction",
+		psec.Alt(sym("binary instruction"), sym("unary instruction")))
 	return g
 }
 
@@ -238,5 +243,93 @@ func addExprParsers(g *psec.Grammar) {
 				return nil, fmt.Errorf("numeric literal %d is too big for 16-bit value", i)
 			}
 			return &core.Constant{Value: uint16(i), Loc: loc}, nil
+		})
+}
+
+var binaryOpcodes = map[string]uint16{
+	"set": 1,
+	"add": 2,
+	"sub": 3,
+	"mul": 4,
+	"mli": 5,
+	"div": 6,
+	"dvi": 7,
+	"mod": 8,
+	"mdi": 9,
+	"and": 10,
+	"bor": 11,
+	"xor": 12,
+	"shr": 13,
+	"asr": 14,
+	"shl": 15,
+	"ifb": 16,
+	"ifc": 17,
+	"ife": 18,
+	"ifn": 19,
+	"ifg": 20,
+	"ifa": 21,
+	"ifl": 22,
+	"ifu": 23,
+	"adx": 0x1a,
+	"sbx": 0x1b,
+	"sti": 0x1e,
+	"std": 0x1f,
+}
+
+func addBinaryOpParsers(g *psec.Grammar) {
+	var opcodes []psec.Parser
+	for op, _ := range binaryOpcodes {
+		opcodes = append(opcodes, litIC(op))
+	}
+	g.WithAction("binary opcode", psec.Alt(opcodes...),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			return binaryOpcodes[r.(string)], nil
+		})
+
+	g.WithAction("binary instruction",
+		psec.Seq(sym("binary opcode"), sym("ws1"),
+			sym("arg"), ws(), lit(","), ws(), sym("arg")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			rs := r.([]interface{})
+			op := rs[0].(uint16)
+			b := rs[2].(*arg)
+			a := rs[6].(*arg)
+			return &binaryOp{opcode: op, b: b, a: a}, nil
+		})
+}
+
+var unaryOpcodes = map[string]uint16{
+	"jsr": 1,
+	"int": 8,
+	"iag": 9,
+	"ias": 10,
+	"rfi": 11,
+	"iaq": 12,
+	"hwn": 16,
+	"hwq": 17,
+	"hwi": 18,
+	"log": 19,
+	"brk": 20,
+	"hlt": 21,
+}
+
+func addUnaryOpParsers(g *psec.Grammar) {
+	var opcodes []psec.Parser
+	for op, _ := range unaryOpcodes {
+		opcodes = append(opcodes, litIC(op))
+	}
+
+	g.WithAction("unary opcode", psec.Alt(opcodes...),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			return unaryOpcodes[r.(string)], nil
+		})
+
+	g.WithAction("unary instruction",
+		psec.Seq(sym("unary opcode"), sym("ws1"), sym("arg")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			rs := r.([]interface{})
+			op := rs[0].(uint16)
+			a := rs[2].(*arg)
+			return &unaryOp{opcode: op, a: a}, nil
 		})
 }

@@ -8,3 +8,14 @@ type arg struct {
 	offset   core.Expression
 	special  int
 }
+
+type binaryOp struct {
+	opcode uint16
+	a      *arg
+	b      *arg
+}
+
+type unaryOp struct {
+	opcode uint16
+	a      *arg
+}
