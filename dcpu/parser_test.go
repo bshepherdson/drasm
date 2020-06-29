@@ -150,4 +150,41 @@ func TestExpr(t *testing.T) {
 	e5 := core.Binary(e4, core.MINUS, core.Unary(core.MINUS, constAt(9, 10)))
 	e6 := core.Binary(e5, core.MINUS, constAt(11, 14))
 	expectExpr(t, dp, "expr", "1  + 4 -- 9 - 11", e6)
+
+	// Parens to override the nesting.
+	e7 := core.Binary(constAt(2, 5), core.MINUS, constAt(4, 9))
+	e8 := core.Binary(constAt(7, 0), core.TIMES, e7)
+	expectExpr(t, dp, "expr", "7 * (2 - 4)", e8)
+}
+
+func TestRegIndex(t *testing.T) {
+	expectArg(t, dp, "[reg+index]", "[a+2]",
+		&arg{reg: 0, indirect: true, offset: constAt(2, 3)})
+
+	e1 := core.Binary(constAt(2, 7), core.TIMES, core.UseLabel("foo", locCol(9)))
+	e2 := core.Unary(core.MINUS, e1)
+	expectArg(t, dp, "[reg+index]", "[  j - 2*foo ]",
+		&arg{reg: 7, indirect: true, offset: e2})
+
+	expectError(t, dp, "[reg+index]", "[b ~3]", "expected + or -, or ], not ~")
+}
+
+func TestPick(t *testing.T) {
+	expectArg(t, dp, "pick", "pick 9", &arg{special: 0x1a, offset: constAt(9, 5)})
+	e1 := core.Binary(core.UseLabel("idx", locCol(9)), core.TIMES, constAt(4, 15))
+	expectArg(t, dp, "pick", "pICk     idx * 4", &arg{special: 0x1a, offset: e1})
+	expectError(t, dp, "pick", "pick0", "minimum 1") // Space is required.
+
+	expectArg(t, dp, "[reg+index]", "[SP  + 6]",
+		&arg{special: 0x1a, indirect: true, offset: constAt(6, 7)})
+}
+
+func TestLitIndirect(t *testing.T) {
+	expectArg(t, dp, "[lit]", "[  8]",
+		&arg{special: 0x1e, indirect: true, offset: constAt(8, 3)})
+}
+
+func TestLit(t *testing.T) {
+	expectArg(t, dp, "lit arg", "8",
+		&arg{special: 0x1f, indirect: false, offset: constAt(8, 0)})
 }

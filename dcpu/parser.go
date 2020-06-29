@@ -3,6 +3,7 @@ package dcpu
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/shepheb/drasm/core"
 	"github.com/shepheb/psec"
@@ -60,7 +61,22 @@ func buildDcpuParser() *psec.Grammar {
 	g := psec.NewGrammar()
 	g.AddSymbol("START", sym("reg"))
 	g.AddSymbol("ws", psec.ManyDrop(psec.OneOf(" \t\r\n")))
+	g.AddSymbol("ws1", psec.Many1(psec.OneOf(" \t\r\n")))
 
+	addArgParsers(g)
+	g.AddSymbol("letterish",
+		psec.Alt(psec.OneOf("$_"), psec.Range('a', 'z'), psec.Range('A', 'Z')))
+	g.WithAction("identifier", psec.Seq(sym("letterish"),
+		psec.Stringify(psec.Many(psec.Alt(psec.Range('0', '9'), sym("letterish"))))),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			rs := r.([]interface{})
+			return fmt.Sprintf("%c%s", rs[0].(byte), rs[1].(string)), nil
+		})
+
+	return g
+}
+
+func addArgParsers(g *psec.Grammar) {
 	// Registers in expressions
 	g.WithAction("reg", psec.OneOf("ABCXYZIJabcxyzij"),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
@@ -100,6 +116,58 @@ func buildDcpuParser() *psec.Grammar {
 	g.AddSymbol("specialArgs",
 		psec.Alt(sym("sp"), sym("pc"), sym("ex"), sym("pushPop"), sym("peek")))
 
+	addExprParsers(g)
+
+	// Also handles [SP + foo] syntax for PICK.
+	g.WithAction("[reg+index]",
+		psec.Seq(lit("["), ws(), psec.Alt(sym("reg"), litIC("sp")), ws(),
+			sym("unaryOp"), ws(), sym("expr"), ws(), lit("]")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			rs := r.([]interface{})
+			var a *arg
+			if reg, ok := rs[2].(*arg); ok {
+				a = reg
+			} else if sp, ok := rs[2].(string); ok && strings.ToLower(sp) == "sp" {
+				a = &arg{special: 0x1a}
+			}
+
+			op := rs[4].(core.Operator)
+			index := rs[6].(core.Expression)
+
+			if op == core.NOT {
+				// Not actually legal to use ~, I'm just abusing the unaryOp for + and -
+				return nil, fmt.Errorf("expected + or -, or ], not ~")
+			}
+
+			if op == core.MINUS {
+				index = core.Unary(core.MINUS, index)
+			}
+
+			return &arg{
+				// One of these two is set
+				reg:      a.reg,
+				special:  a.special,
+				indirect: true,
+				offset:   index,
+			}, nil
+		})
+
+	g.WithAction("pick", psec.SeqAt(2, litIC("pick"), sym("ws1"), sym("expr")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			return &arg{special: 0x1a, offset: r.(core.Expression)}, nil
+		})
+
+	g.WithAction("[lit]", psec.SeqAt(2, lit("["), ws(), sym("expr"), ws(), lit("]")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			return &arg{special: 0x1e, indirect: true, offset: r.(core.Expression)}, nil
+		})
+	g.WithAction("lit arg", sym("expr"),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			return &arg{special: 0x1f, offset: r.(core.Expression)}, nil
+		})
+}
+
+func addExprParsers(g *psec.Grammar) {
 	// Expressions
 	g.WithAction("unaryOp", psec.OneOf("+-~"),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
@@ -124,15 +192,6 @@ func buildDcpuParser() *psec.Grammar {
 			return nil, fmt.Errorf("can't happen: unrecognized mulOp %v", r)
 		})
 
-	g.AddSymbol("letterish",
-		psec.Alt(psec.OneOf("$_"), psec.Range('a', 'z'), psec.Range('A', 'Z')))
-	g.WithAction("identifier", psec.Seq(sym("letterish"),
-		psec.Stringify(psec.Many(psec.Alt(psec.Range('0', '9'), sym("letterish"))))),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			return fmt.Sprintf("%c%s", rs[0].(byte), rs[1].(string)), nil
-		})
-
 	g.WithAction("expr",
 		psec.Seq(sym("expr1"),
 			psec.Many(psec.Seq(ws(), sym("addOp"), ws(), sym("expr1")))),
@@ -153,6 +212,7 @@ func buildDcpuParser() *psec.Grammar {
 
 			return core.Unary(rs[0].(core.Operator), rs[1].(core.Expression)), nil
 		})
+
 	g.AddSymbol("expr3", psec.Alt(sym("label_use"), sym("literal"),
 		psec.SeqAt(2, lit("("), ws(), sym("expr"), ws(), lit(")"))))
 
@@ -174,6 +234,4 @@ func buildDcpuParser() *psec.Grammar {
 			}
 			return &core.Constant{Value: uint16(i), Loc: loc}, nil
 		})
-
-	return g
 }
