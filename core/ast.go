@@ -188,6 +188,13 @@ func DefineSymbol(name string, value Expression) *SymbolDef {
 	return &SymbolDef{name, value}
 }
 
+func (sd *SymbolDef) Compare(name string, value Expression) bool {
+	if sd.name != name {
+		return false
+	}
+	return sd.value.Equals(value)
+}
+
 // Assemble for SymbolDef recomputes the value of the symbol, in case it has
 // changed.
 func (d *SymbolDef) Assemble(s *AssemblyState) {
@@ -221,11 +228,14 @@ func (b *FillBlock) Assemble(s *AssemblyState) {
 
 // LabelDef is issued when a new label is defined with :foo.
 // Note that redefining a label is an error.
-type LabelDef struct{ label string }
+type LabelDef struct {
+	Label string
+	loc   *psec.Loc
+}
 
 // DefineLabel constructs a new LabelDef with the given name.
-func DefineLabel(label string) *LabelDef {
-	return &LabelDef{label}
+func DefineLabel(label string, loc *psec.Loc) *LabelDef {
+	return &LabelDef{Label: label, loc: loc}
 }
 
 // Assemble for LabelDef: update the value of the label to the current index,
@@ -233,5 +243,5 @@ func DefineLabel(label string) *LabelDef {
 func (l *LabelDef) Assemble(s *AssemblyState) {
 	// Labels are collected in an earlier pass, but we need to note the current
 	// index as its value.
-	s.updateLabel(l.label, s.index)
+	s.updateLabel(l.Label, s.index)
 }

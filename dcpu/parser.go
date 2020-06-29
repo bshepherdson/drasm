@@ -2,7 +2,6 @@ package dcpu
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/shepheb/drasm/core"
@@ -42,42 +41,65 @@ func ws() psec.Parser {
 	return psec.Symbol("ws")
 }
 
-func binaryAction(r interface{}, loc *psec.Loc) (interface{}, error) {
-	rs := r.([]interface{})
-	expr := rs[0].(core.Expression)
-
-	tail := rs[1].([]interface{})
-	for _, tailChunk := range tail {
-		seq := tailChunk.([]interface{})
-		op := seq[1].(core.Operator)
-		rhs := seq[3].(core.Expression)
-		expr = core.Binary(expr, op, rhs)
-	}
-
-	return expr, nil
-}
-
 func buildDcpuParser() *psec.Grammar {
 	g := psec.NewGrammar()
-	g.AddSymbol("START", sym("reg"))
-	g.AddSymbol("ws", psec.ManyDrop(psec.OneOf(" \t\r\n")))
-	g.AddSymbol("ws1", psec.Many1(psec.OneOf(" \t\r\n")))
+	core.AddBasicParsers(g) // Adds ws, identifiers, etc.
+	core.AddDirectiveParsers(g)
+	core.AddExprParsers(g)
 
-	g.AddSymbol("letterish",
-		psec.Alt(psec.OneOf("$_"), psec.Range('a', 'z'), psec.Range('A', 'Z')))
-	g.WithAction("identifier", psec.Seq(sym("letterish"),
-		psec.Stringify(psec.Many(psec.Alt(psec.Range('0', '9'), sym("letterish"))))),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			return fmt.Sprintf("%c%s", rs[0].(byte), rs[1].(string)), nil
-		})
-
+	g.AddSymbol("START", sym("file"))
 	addArgParsers(g)
 	addBinaryOpParsers(g)
 	addUnaryOpParsers(g)
-
 	g.AddSymbol("instruction",
 		psec.Alt(sym("binary instruction"), sym("unary instruction")))
+
+	g.AddSymbol("content",
+		// This backtracking is probably slow, but I'm not sure how to do better.
+		psec.Alt(sym("directive"), sym("labeled instruction"), sym("label")))
+
+	g.WithAction("labeled instruction",
+		psec.Seq(psec.Many(psec.SeqAt(0, sym("label"), sym("ws1"))), sym("instruction")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			// Returns either a single instruction, or a list of Assembled values,
+			// for the labels and then the instruction.
+			rs := r.([]interface{})
+			if rs[0] == nil {
+				return rs[1], nil
+			}
+
+			labels := rs[0].([]interface{})
+			if len(labels) == 0 {
+				return rs[1], nil
+			}
+
+			return append(labels, rs[1]), nil
+		})
+
+	// The preamble or postamble, whitespace and comments on either end of a file.
+	g.AddSymbol("amble",
+		psec.Seq(ws(), psec.Many(psec.Seq(sym("comment"), ws()))))
+
+	g.WithAction("file",
+		psec.SeqAt(1, sym("amble"), psec.SepBy(sym("content"), sym("eol")), sym("amble")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			// Comments give nil, the rest give Assembled values.
+			rs := r.([]interface{})
+			var asm []core.Assembled
+			for _, val := range rs {
+				if val != nil {
+					if asms, ok := val.([]interface{}); ok {
+						for _, a := range asms {
+							asm = append(asm, a.(core.Assembled))
+						}
+					} else {
+						asm = append(asm, val.(core.Assembled))
+					}
+				}
+			}
+			return &core.AST{Lines: asm}, nil
+		})
+
 	return g
 }
 
@@ -120,8 +142,6 @@ func addArgParsers(g *psec.Grammar) {
 		})
 	g.AddSymbol("specialArgs",
 		psec.Alt(sym("sp"), sym("pc"), sym("ex"), sym("pushPop"), sym("peek")))
-
-	addExprParsers(g)
 
 	// Also handles [SP + foo] syntax for PICK.
 	g.WithAction("[reg+index]",
@@ -177,75 +197,6 @@ func addArgParsers(g *psec.Grammar) {
 		sym("[lit]"), sym("lit arg")))
 }
 
-func addExprParsers(g *psec.Grammar) {
-	// Expressions
-	g.WithAction("unaryOp", psec.OneOf("+-~"),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			return core.OperatorNames[string((r.(byte)))], nil
-		})
-	g.WithAction("addOp", psec.OneOf("+-|^"),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			return core.OperatorNames[string((r.(byte)))], nil
-		})
-	g.WithAction("mulOp",
-		psec.Alt(psec.OneOf("*/&"), lit("<<"), lit(">>")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			switch rr := r.(type) {
-			case string:
-				if rr == "<<" {
-					return core.LANGLES, nil
-				}
-				return core.RANGLES, nil
-			case byte:
-				return core.OperatorNames[string(rr)], nil
-			}
-			return nil, fmt.Errorf("can't happen: unrecognized mulOp %v", r)
-		})
-
-	g.WithAction("expr",
-		psec.Seq(sym("expr1"),
-			psec.Many(psec.Seq(ws(), sym("addOp"), ws(), sym("expr1")))),
-		binaryAction)
-
-	g.WithAction("expr1",
-		psec.Seq(sym("expr2"),
-			psec.Many(psec.Seq(ws(), sym("mulOp"), ws(), sym("expr2")))),
-		binaryAction)
-
-	g.WithAction("expr2",
-		psec.Seq(psec.Optional(psec.SeqAt(0, sym("unaryOp"), ws())), sym("expr3")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			if rs[0] == nil {
-				return rs[1], nil
-			}
-
-			return core.Unary(rs[0].(core.Operator), rs[1].(core.Expression)), nil
-		})
-
-	g.AddSymbol("expr3", psec.Alt(sym("label_use"), sym("literal"),
-		psec.SeqAt(2, lit("("), ws(), sym("expr"), ws(), lit(")"))))
-
-	g.WithAction("label_use", sym("identifier"),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			return core.UseLabel(r.(string), loc), nil
-		})
-
-	// TODO: hex and binary literals, maybe character literals?
-	g.WithAction("literal", psec.Stringify(psec.Many1(psec.Range('0', '9'))),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			i, err := strconv.ParseInt(r.(string), 10, 32)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse integer literal '%s': %v", r, err)
-			}
-
-			if i > 65535 {
-				return nil, fmt.Errorf("numeric literal %d is too big for 16-bit value", i)
-			}
-			return &core.Constant{Value: uint16(i), Loc: loc}, nil
-		})
-}
-
 var binaryOpcodes = map[string]uint16{
 	"set": 1,
 	"add": 2,
@@ -278,7 +229,7 @@ var binaryOpcodes = map[string]uint16{
 
 func addBinaryOpParsers(g *psec.Grammar) {
 	var opcodes []psec.Parser
-	for op, _ := range binaryOpcodes {
+	for op := range binaryOpcodes {
 		opcodes = append(opcodes, litIC(op))
 	}
 	g.WithAction("binary opcode", psec.Alt(opcodes...),
@@ -315,7 +266,7 @@ var unaryOpcodes = map[string]uint16{
 
 func addUnaryOpParsers(g *psec.Grammar) {
 	var opcodes []psec.Parser
-	for op, _ := range unaryOpcodes {
+	for op := range unaryOpcodes {
 		opcodes = append(opcodes, litIC(op))
 	}
 

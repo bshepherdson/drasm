@@ -5,13 +5,13 @@ import (
 	"os"
 
 	"github.com/shepheb/drasm/core"
-	"github.com/shepheb/drasm/rq"
+	"github.com/shepheb/drasm/dcpu"
 )
 
 func main() {
 	// Grab the first argument and assemble it.
 	file := os.Args[1]
-	machine := &rq.Driver{}
+	machine := &dcpu.Driver{}
 	ast, err := machine.ParseFile(file)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)

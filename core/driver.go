@@ -18,8 +18,8 @@ func collectLabels(ast *AST, s *AssemblyState) error {
 		fmt.Printf("line: %#v\n", l)
 		labelDef, ok := l.(*LabelDef)
 		if ok {
-			fmt.Printf("label added: %s\n", labelDef.label)
-			s.addLabel(labelDef.label)
+			fmt.Printf("label added: %s\n", labelDef.Label)
+			s.addLabel(labelDef.Label)
 		}
 	}
 	return nil

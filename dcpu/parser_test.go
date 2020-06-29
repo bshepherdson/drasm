@@ -94,7 +94,11 @@ func TestLiteral(t *testing.T) {
 		"numeric literal 876543 is too big for 16-bit value")
 }
 
-var testLoc = &psec.Loc{Filename: "test", Line: 1, Col: 0}
+func loc(line, col int) *psec.Loc {
+	return &psec.Loc{Filename: "test", Line: line, Col: col}
+}
+
+var testLoc = loc(1, 0)
 var expr712 core.Expression = &core.Constant{Value: 712, Loc: testLoc}
 
 // We test expr3 later because it can contain subexpressions.
@@ -108,7 +112,7 @@ func TestExpr2(t *testing.T) {
 }
 
 func locCol(col int) *psec.Loc {
-	return &psec.Loc{Filename: "test", Line: 1, Col: col}
+	return loc(1, col)
 }
 
 func constAt(value uint16, col int) core.Expression {
@@ -215,13 +219,8 @@ func TestArg(t *testing.T) {
 	})
 }
 
-func expectBinOp(t *testing.T, input string, opcode uint16, b, a *arg) {
-	res, err := dp.ParseStringWith("test", input, "binary instruction")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if op, ok := res.(*binaryOp); ok {
+func compareBinOp(t *testing.T, r interface{}, opcode uint16, b, a *arg) {
+	if op, ok := r.(*binaryOp); ok {
 		if op == nil {
 			t.Errorf("failed to parse expression, got nil")
 		} else if op.opcode != opcode {
@@ -231,8 +230,17 @@ func expectBinOp(t *testing.T, input string, opcode uint16, b, a *arg) {
 			compareArgs(t, b, op.b)
 		}
 	} else {
-		t.Errorf("expected *binaryOp, but got %T", res)
+		t.Errorf("expected *binaryOp, but got %T", r)
 	}
+}
+
+func expectBinOp(t *testing.T, input string, opcode uint16, b, a *arg) {
+	res, err := dp.ParseStringWith("test", input, "binary instruction")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	compareBinOp(t, res, opcode, b, a)
 }
 
 func TestBinaryInstructions(t *testing.T) {
@@ -243,13 +251,8 @@ func TestBinaryInstructions(t *testing.T) {
 	expectBinOp(t, "ifg ex   ,pc", 0x14, &arg{special: 0x1d}, &arg{special: 0x1c})
 }
 
-func expectUnaryOp(t *testing.T, input string, opcode uint16, a *arg) {
-	res, err := dp.ParseStringWith("test", input, "unary instruction")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if op, ok := res.(*unaryOp); ok {
+func compareUnOp(t *testing.T, r interface{}, opcode uint16, a *arg) {
+	if op, ok := r.(*unaryOp); ok {
 		if op == nil {
 			t.Errorf("failed to parse expression, got nil")
 		} else if op.opcode != opcode {
@@ -258,8 +261,16 @@ func expectUnaryOp(t *testing.T, input string, opcode uint16, a *arg) {
 			compareArgs(t, a, op.a)
 		}
 	} else {
-		t.Errorf("expected *unaryOp, but got %T", res)
+		t.Errorf("expected *unaryOp, but got %T", r)
 	}
+}
+
+func expectUnaryOp(t *testing.T, input string, opcode uint16, a *arg) {
+	res, err := dp.ParseStringWith("test", input, "unary instruction")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	compareUnOp(t, res, opcode, a)
 }
 
 func TestUnaryInstructions(t *testing.T) {
@@ -267,4 +278,134 @@ func TestUnaryInstructions(t *testing.T) {
 		&arg{special: 0x1f, offset: core.UseLabel("somewhere", locCol(4))})
 	expectUnaryOp(t, "int 0", 8, &arg{special: 0x1f, offset: constAt(0, 4)})
 	expectUnaryOp(t, "rfi pop", 11, &arg{special: 0x18})
+}
+
+func TestLabel(t *testing.T) {
+	res, err := dp.ParseStringWith("test", ":foo", "label")
+	if err != nil {
+		t.Errorf("unexpected error %v", err)
+	}
+	r := res.(*core.LabelDef)
+	if r == nil || r.Label != "foo" {
+		t.Errorf("expected LabelDef for foo, got %#v", r)
+	}
+}
+
+func TestLabeledInstruction(t *testing.T) {
+	res, err := dp.ParseStringWith("test", "set b, a", "labeled instruction")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// Should be a single *binaryOp for unlabeled.
+	compareBinOp(t, res, 1, &arg{reg: 1}, &arg{reg: 0})
+
+	// Now with labels
+	res, err = dp.ParseStringWith("test", ":main :more set b, a", "labeled instruction")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Should be an array of the two LabelDefs and the binaryOp.
+	if rs, ok := res.([]interface{}); ok {
+		// Check the LabelDefs
+		expectLabel(t, rs[0], "main")
+		expectLabel(t, rs[1], "more")
+		compareBinOp(t, rs[2], 1, &arg{reg: 1}, &arg{reg: 0})
+	} else {
+		t.Errorf("expected a list, got %T", res)
+	}
+}
+
+func expectLabel(t *testing.T, r interface{}, label string) {
+	ld, ok := r.(*core.LabelDef)
+	if !ok {
+		t.Errorf("expected *LabelDef, got %T", r)
+		return
+	}
+
+	if ld.Label != label {
+		t.Errorf("label mismatch, expected %s got %s", label, ld.Label)
+	}
+}
+
+func TestFile(t *testing.T) {
+	input := `
+; Some file
+.org 300
+:main set a,b ; wut
+rfi [a-7]
+
+.def foo, 2
+:function
+adx a, pop
+set [foo], b
+set pc, pop`
+
+	ret, err := dp.ParseString("test", input)
+	if err != nil {
+		t.Errorf("unexpected parser error: %v", err)
+		return
+	}
+
+	ast, ok := ret.(*core.AST)
+	if !ok {
+		t.Errorf("expected *AST from ParseString, got %T", ret)
+	}
+
+	if len(ast.Lines) != 9 {
+		t.Errorf("expected 9 assembled lines, got %d", len(ast.Lines))
+	}
+
+	// Item 0: .org
+	if org, ok := ast.Lines[0].(*core.Org); ok {
+		if !org.Abs.Equals(&core.Constant{Value: 300, Loc: loc(2, 0)}) {
+			t.Errorf("bad .org expression %#v", org)
+		}
+	} else {
+		t.Errorf("Expected item 0 to be org, got %T", ast.Lines[0])
+	}
+
+	// Item 1: label main
+	if ld, ok := ast.Lines[1].(*core.LabelDef); ok {
+		if ld.Label != "main" {
+			t.Errorf("bad label main, got %s", ld.Label)
+		}
+	} else {
+		t.Errorf("Expected item 1 to be LabelDef, got %T", ast.Lines[1])
+	}
+
+	// Item 2: set a, b
+	compareBinOp(t, ast.Lines[2], 1, &arg{reg: 0}, &arg{reg: 1})
+
+	// Item 3: rfi [a - 7]
+	compareUnOp(t, ast.Lines[3], 11, &arg{
+		reg:      0,
+		indirect: true,
+		offset:   core.Unary(core.MINUS, &core.Constant{Value: 7, Loc: loc(3, 7)}),
+	})
+
+	// Item 4: def foo, 2
+	if def, ok := ast.Lines[4].(*core.SymbolDef); ok {
+		if !def.Compare("foo", &core.Constant{Value: 2, Loc: loc(5, 100)}) {
+			t.Errorf("expected SymbolDef('foo', 2), got %+v", def)
+		}
+	}
+
+	// Item 5: :function label
+	if ld, ok := ast.Lines[5].(*core.LabelDef); ok {
+		if ld.Label != "function" {
+			t.Errorf("expected label function, got %s", ld.Label)
+		}
+	}
+
+	// Item 6: adx a, pop
+	compareBinOp(t, ast.Lines[6], 0x1a, &arg{reg: 0}, &arg{special: 0x18})
+
+	// Item 7: set [foo], b
+	compareBinOp(t, ast.Lines[7], 1,
+		&arg{special: 0x1e, indirect: true, offset: core.UseLabel("foo", loc(8, 5))},
+		&arg{reg: 1})
+
+	// Item 8: set pc, pop
+	compareBinOp(t, ast.Lines[8], 1, &arg{special: 0x1c}, &arg{special: 0x18})
 }
