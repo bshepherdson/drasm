@@ -165,6 +165,11 @@ func addArgParsers(g *psec.Grammar) {
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			return &arg{special: 0x1f, offset: r.(core.Expression)}, nil
 		})
+
+	g.AddSymbol("arg", psec.Alt(
+		sym("reg"), sym("[reg]"), sym("[reg+index]"),
+		sym("specialArgs"), sym("pick"),
+		sym("[lit]"), sym("lit arg")))
 }
 
 func addExprParsers(g *psec.Grammar) {

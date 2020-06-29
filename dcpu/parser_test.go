@@ -188,3 +188,25 @@ func TestLit(t *testing.T) {
 	expectArg(t, dp, "lit arg", "8",
 		&arg{special: 0x1f, indirect: false, offset: constAt(8, 0)})
 }
+
+func TestArg(t *testing.T) {
+	expectArg(t, dp, "arg", "B", &arg{reg: 1})
+	expectArg(t, dp, "arg", "[ y ]", &arg{reg: 4, indirect: true})
+	expectArg(t, dp, "arg", "[ i+ 14]",
+		&arg{reg: 6, indirect: true, offset: constAt(14, 5)})
+	expectArg(t, dp, "arg", "push", &arg{special: 0x18})
+	expectArg(t, dp, "arg", "POP", &arg{special: 0x18})
+	expectArg(t, dp, "arg", "[--sp]", &arg{special: 0x18})
+	expectArg(t, dp, "arg", "[SP++]", &arg{special: 0x18})
+	expectArg(t, dp, "arg", "sp", &arg{special: 0x1b})
+	expectArg(t, dp, "arg", "PC", &arg{special: 0x1c})
+	expectArg(t, dp, "arg", "EX", &arg{special: 0x1d})
+	expectArg(t, dp, "arg", "[12]",
+		&arg{special: 0x1e, indirect: true, offset: constAt(12, 1)})
+
+	expectArg(t, dp, "arg", "foo ^ ~7", &arg{
+		special: 0x1f,
+		offset: core.Binary(core.UseLabel("foo", locCol(0)), core.XOR,
+			core.Unary(core.NOT, constAt(7, 7))),
+	})
+}
