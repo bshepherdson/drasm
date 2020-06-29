@@ -2,6 +2,10 @@ package core
 
 import "fmt"
 
+type Driver interface {
+	ParseFile(filename string) (*AST, error)
+}
+
 func RunAssembler(ast *AST) ([]uint16, error) {
 	s := new(AssemblyState)
 	collectLabels(ast, s)

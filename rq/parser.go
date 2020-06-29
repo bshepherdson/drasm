@@ -80,7 +80,7 @@ func (p *parser) Parse() (*core.AST, error) {
 		} else if tok == COLON { // Label definition
 			tok, lit = p.scan() // WS not allowed.
 			if tok == IDENT {
-				lines = append(lines, core.DefineLabel(lit))
+				lines = append(lines, core.DefineLabel(lit, p.s.Location()))
 			} else {
 				return nil, p.wrapError(fmt.Errorf("Bad label: '%s'", lit))
 			}
