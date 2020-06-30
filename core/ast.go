@@ -12,6 +12,12 @@ type AST struct {
 	Lines []Assembled
 }
 
+func (a *AST) Assemble(s *AssemblyState) {
+	for _, line := range a.Lines {
+		line.Assemble(s)
+	}
+}
+
 // Expression evaluates to a number, and keeps track of its location for error
 // messages.
 type Expression interface {

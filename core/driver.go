@@ -1,16 +1,39 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 type Driver interface {
 	ParseFile(filename string) (*AST, error)
 }
 
-func RunAssembler(ast *AST) ([]uint16, error) {
+// Used by Include to recursively parse.
+var currentDriver Driver
+
+func MasterAssembler(machine Driver, file, outfile string) {
+	currentDriver = machine
+
+	ast, err := machine.ParseFile(file)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
 	s := new(AssemblyState)
 	collectLabels(ast, s)
 	assemble(ast, s)
-	return s.rom[:s.index], nil
+	rom := s.rom[:s.index]
+
+	// Now output the binary, big-endian.
+	// TODO: Flexible endianness.
+	// TODO: Include support.
+	out, _ := os.Create(outfile)
+	defer out.Close()
+	for _, w := range rom {
+		out.Write([]byte{byte(w >> 8), byte(w & 0xff)})
+	}
 }
 
 func collectLabels(ast *AST, s *AssemblyState) error {

@@ -33,4 +33,7 @@ func AddBasicParsers(g *psec.Grammar) {
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			return DefineLabel(r.(string), loc), nil
 		})
+
+	g.AddSymbol("string", psec.SeqAt(1, lit("\""),
+		psec.Stringify(psec.ManyTill(psec.AnyChar(), lit("\"")))))
 }

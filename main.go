@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
 
 	"github.com/shepheb/drasm/core"
 	"github.com/shepheb/drasm/dcpu"
@@ -29,22 +28,5 @@ func main() {
 		return
 	}
 
-	ast, err := machine.ParseFile(file)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-	rom, err := core.RunAssembler(ast)
-	if err != nil {
-		fmt.Printf("Failed to assemble: %v", err)
-	}
-
-	// Now output the binary, big-endian.
-	// TODO: Flexible endianness.
-	// TODO: Include support.
-	out, _ := os.Create(*output)
-	defer out.Close()
-	for _, w := range rom {
-		out.Write([]byte{byte(w >> 8), byte(w & 0xff)})
-	}
+	core.MasterAssembler(machine, file, *output)
 }

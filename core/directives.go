@@ -20,7 +20,8 @@ func AddDirectiveParsers(g *psec.Grammar) {
 	g.WithAction("dir:include",
 		psec.SeqAt(2, litIC("include"), sym("ws1"), sym("string")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			return &Include{filename: r.(string)}, nil
+			// Recursively parse the file.
+			return currentDriver.ParseFile(r.(string))
 		})
 	g.WithAction("dir:symbol",
 		psec.Seq(psec.Alt(litIC("symbol"), litIC("sym"), litIC("equ"),
