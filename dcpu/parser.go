@@ -44,61 +44,12 @@ func ws() psec.Parser {
 func buildDcpuParser() *psec.Grammar {
 	g := psec.NewGrammar()
 	core.AddBasicParsers(g) // Adds ws, identifiers, etc.
-	core.AddDirectiveParsers(g)
-	core.AddExprParsers(g)
 
-	g.AddSymbol("START", sym("file"))
 	addArgParsers(g)
 	addBinaryOpParsers(g)
 	addUnaryOpParsers(g)
 	g.AddSymbol("instruction",
 		psec.Alt(sym("binary instruction"), sym("unary instruction"), sym("macro use")))
-
-	g.AddSymbol("content",
-		// This backtracking is probably slow, but I'm not sure how to do better.
-		psec.Alt(sym("directive"), sym("labeled instruction"), sym("label")))
-
-	g.WithAction("labeled instruction",
-		psec.Seq(psec.Many(psec.SeqAt(0, sym("label"), sym("ws1"))), sym("instruction")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			// Returns either a single instruction, or a list of Assembled values,
-			// for the labels and then the instruction.
-			rs := r.([]interface{})
-			if rs[0] == nil {
-				return rs[1], nil
-			}
-
-			labels := rs[0].([]interface{})
-			if len(labels) == 0 {
-				return rs[1], nil
-			}
-
-			return append(labels, rs[1]), nil
-		})
-
-	// The preamble or postamble, whitespace and comments on either end of a file.
-	g.AddSymbol("amble",
-		psec.Seq(ws(), psec.Many(psec.Seq(sym("comment"), ws()))))
-
-	g.WithAction("file",
-		psec.SeqAt(1, sym("amble"), psec.SepBy(sym("content"), sym("eol")), sym("amble")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			// Comments give nil, the rest give Assembled values.
-			rs := r.([]interface{})
-			var asm []core.Assembled
-			for _, val := range rs {
-				if val != nil {
-					if asms, ok := val.([]interface{}); ok {
-						for _, a := range asms {
-							asm = append(asm, a.(core.Assembled))
-						}
-					} else {
-						asm = append(asm, val.(core.Assembled))
-					}
-				}
-			}
-			return &core.AST{Lines: asm}, nil
-		})
 
 	return g
 }

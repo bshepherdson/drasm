@@ -1,0 +1,15 @@
+:reset b main
+
+.org 8
+:irq rfi
+
+.org 32 ; TODO hex literals
+:main
+ifc
+ifs
+swi #9
+bne main
+
+mov r0, #7     ; Inline MOV
+mov r0, #-3    ; Inline MVN
+mov r0, #7890 ; MOV + MVH

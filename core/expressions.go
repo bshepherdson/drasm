@@ -21,7 +21,7 @@ func ws() psec.Parser {
 	return psec.Symbol("ws")
 }
 
-func AddExprParsers(g *psec.Grammar) {
+func addExprParsers(g *psec.Grammar) {
 	// Expressions
 	g.WithAction("unaryOp", psec.OneOf("+-~"),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {

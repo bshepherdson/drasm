@@ -42,7 +42,7 @@ type loadStore struct {
 	dest    uint16 // Destination register. Required
 	base    uint16 // Base register. Required, but -1 for SP/PC.
 	preLit  core.Expression
-	preReg  uint16
+	preReg  uint16 // -1 to signal none
 	postLit core.Expression
 }
 

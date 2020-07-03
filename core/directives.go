@@ -3,8 +3,8 @@ package core
 import "github.com/shepheb/psec"
 
 // Shared psec parsers for the assembler directives.
-func AddDirectiveParsers(g *psec.Grammar) {
-	AddMacroParsers(g)
+func addDirectiveParsers(g *psec.Grammar) {
+	addMacroParsers(g)
 	g.WithAction("dir:org",
 		psec.SeqAt(2, litIC("org"), sym("ws1"), sym("expr")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {

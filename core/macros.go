@@ -51,7 +51,7 @@ func doMacro(s *AssemblyState, name string, args []string) (string, error) {
 	return text, nil
 }
 
-func AddMacroParsers(g *psec.Grammar) {
+func addMacroParsers(g *psec.Grammar) {
 	// This is even looser than an instruction, just a name and comma-separated
 	// list, but the name must be defined as a macro or the action errors out.
 	// This rule should be used as the last option for a legal line of assembly.

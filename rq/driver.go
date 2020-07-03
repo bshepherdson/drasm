@@ -1,9 +1,7 @@
 package rq
 
 import (
-	"bufio"
-	"os"
-	"strings"
+	"io/ioutil"
 
 	"github.com/shepheb/drasm/core"
 )
@@ -11,20 +9,34 @@ import (
 // Driver is the host for some methods.
 type Driver struct{}
 
+var pr = buildRisqueParser()
+
 // ParseFile parses a file by name, returning an AST.
 func (d *Driver) ParseFile(filename string) (*core.AST, error) {
-	f, err := os.Open(filename)
+	text, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
-	p := newParser(filename, bufio.NewReader(f))
-	return p.Parse()
+
+	ast, err := pr.ParseString(filename, string(text))
+	if err != nil {
+		return nil, err
+	}
+	return ast.(*core.AST), nil
 }
 
-func (d *Driver) ParseString(filename, str string) (*core.AST, error) {
-	return newParser(filename, strings.NewReader(str)).Parse()
+func (d *Driver) ParseString(filename, text string) (*core.AST, error) {
+	ast, err := pr.ParseString(filename, text)
+	if err != nil {
+		return nil, err
+	}
+	return ast.(*core.AST), nil
 }
 
-func (d *Driver) ParseExpr(filename, str string) (core.Expression, error) {
-	return newParser(filename, strings.NewReader(str)).parseSimpleExpr()
+func (d *Driver) ParseExpr(filename, text string) (core.Expression, error) {
+	expr, err := pr.ParseStringWith(filename, text, "expr")
+	if err != nil {
+		return nil, err
+	}
+	return expr.(core.Expression), nil
 }
