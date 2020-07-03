@@ -8,7 +8,12 @@ import (
 	"github.com/shepheb/psec"
 )
 
-var dp = buildDcpuParser()
+func setup() *psec.Grammar {
+	core.SetDriver(&Driver{})
+	return buildDcpuParser()
+}
+
+var dp = setup()
 
 func compareArgs(t *testing.T, exp, act *arg) {
 	if act == nil {
@@ -326,6 +331,20 @@ func expectLabel(t *testing.T, r interface{}, label string) {
 	if ld.Label != label {
 		t.Errorf("label mismatch, expected %s got %s", label, ld.Label)
 	}
+}
+
+func TestTrivialFile(t *testing.T) {
+	ret, err := dp.ParseString("test", "set a, b")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	ast := ret.(*core.AST)
+	if len(ast.Lines) != 1 {
+		t.Errorf("bad line count, got %d expecting 1", len(ast.Lines))
+	}
+
+	compareBinOp(t, ast.Lines[0], 1, &arg{reg: 0}, &arg{reg: 1})
 }
 
 func TestFile(t *testing.T) {

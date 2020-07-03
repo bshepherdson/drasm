@@ -4,6 +4,7 @@ import "github.com/shepheb/psec"
 
 // Shared psec parsers for the assembler directives.
 func AddDirectiveParsers(g *psec.Grammar) {
+	AddMacroParsers(g)
 	g.WithAction("dir:org",
 		psec.SeqAt(2, litIC("org"), sym("ws1"), sym("expr")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
@@ -41,9 +42,19 @@ func AddDirectiveParsers(g *psec.Grammar) {
 			}
 			return &DatBlock{Values: values}, nil
 		})
+	g.WithAction("dir:macro",
+		psec.Seq(litIC("macro"), sym("wsline"), sym("identifier"), sym("wsline"),
+			lit("="), psec.Stringify(psec.Many1(psec.NoneOf("\n")))),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			rs := r.([]interface{})
+			ident := rs[2].(string)
+			body := rs[5].(string)
+			addMacro(ident, body)
+			return &MacroDef{name: ident, body: body}, nil
+		})
 
 	g.AddSymbol("directive",
 		psec.SeqAt(1, psec.Literal("."),
-			psec.Alt(sym("dir:fill"), sym("dir:include"),
+			psec.Alt(sym("dir:fill"), sym("dir:include"), sym("dir:macro"),
 				sym("dir:org"), sym("dir:dat"), sym("dir:symbol"))))
 }

@@ -251,3 +251,35 @@ func (l *LabelDef) Assemble(s *AssemblyState) {
 	// index as its value.
 	s.updateLabel(l.Label, s.index)
 }
+
+type MacroDef struct {
+	name string
+	body string
+}
+
+func (m *MacroDef) Assemble(s *AssemblyState) {
+	// Update the cached definitions, so we get the current one.
+	addMacro(m.name, m.body)
+}
+
+type MacroUse struct {
+	macro string
+	args  []string
+}
+
+func (m *MacroUse) Assemble(s *AssemblyState) {
+	text, err := doMacro(s, m.macro, m.args)
+	if err != nil {
+		panic(fmt.Sprintf("broken macro: %v", err))
+	}
+
+	parsed, err := currentDriver.ParseString("macro", text)
+	if err != nil {
+		// TODO Errors from Assemble? Probably wise.
+		panic(fmt.Sprintf("failed to parse macro result: %v", err))
+	}
+
+	for _, asm := range parsed.Lines {
+		asm.Assemble(s)
+	}
+}

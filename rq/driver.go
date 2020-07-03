@@ -3,6 +3,7 @@ package rq
 import (
 	"bufio"
 	"os"
+	"strings"
 
 	"github.com/shepheb/drasm/core"
 )
@@ -18,4 +19,12 @@ func (d *Driver) ParseFile(filename string) (*core.AST, error) {
 	}
 	p := newParser(filename, bufio.NewReader(f))
 	return p.Parse()
+}
+
+func (d *Driver) ParseString(filename, str string) (*core.AST, error) {
+	return newParser(filename, strings.NewReader(str)).Parse()
+}
+
+func (d *Driver) ParseExpr(filename, str string) (core.Expression, error) {
+	return newParser(filename, strings.NewReader(str)).parseSimpleExpr()
 }

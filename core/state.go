@@ -22,6 +22,8 @@ type AssemblyState struct {
 	// Updateable defines.
 	symbols map[string]*labelRef
 
+	macros map[string]string
+
 	// True when all labels are resolved, false otherwise.
 	resolved bool
 	// True when something has changed this pass (eg. a label's value).
@@ -86,4 +88,8 @@ func (s *AssemblyState) Push(x uint16) {
 	s.used[s.index] = true
 	s.rom[s.index] = x
 	s.index++
+}
+
+func (s *AssemblyState) addMacro(name, body string) {
+
 }

@@ -6,25 +6,30 @@ import (
 )
 
 type Driver interface {
+	ParseExpr(filename, text string) (Expression, error)
+	ParseString(filename, test string) (*AST, error)
 	ParseFile(filename string) (*AST, error)
 }
 
 // Used by Include to recursively parse.
 var currentDriver Driver
 
+// TODO This sucks and should be replaced by a payload on the parser.
+func SetDriver(machine Driver) {
+	currentDriver = machine
+}
+
 func MasterAssembler(machine Driver, file, outfile string) {
 	currentDriver = machine
 
+	FreshMacros()
 	ast, err := machine.ParseFile(file)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
-	s := new(AssemblyState)
-	collectLabels(ast, s)
-	assemble(ast, s)
-	rom := s.rom[:s.index]
+	rom := AssembleAst(ast)
 
 	// Now output the binary, big-endian.
 	// TODO: Flexible endianness.
@@ -36,16 +41,20 @@ func MasterAssembler(machine Driver, file, outfile string) {
 	}
 }
 
+func AssembleAst(ast *AST) []uint16 {
+	s := new(AssemblyState)
+	collectLabels(ast, s)
+	assemble(ast, s)
+	return s.rom[:s.index]
+}
+
 func collectLabels(ast *AST, s *AssemblyState) error {
 	s.labels = make(map[string]*labelRef)
 	s.reset()
 	// Collect the labels.
-	fmt.Printf("===========================\n")
 	for _, l := range ast.Lines {
-		fmt.Printf("line: %#v\n", l)
 		labelDef, ok := l.(*LabelDef)
 		if ok {
-			fmt.Printf("label added: %s\n", labelDef.Label)
 			s.addLabel(labelDef.Label)
 		}
 	}
@@ -60,7 +69,6 @@ func assemble(ast *AST, s *AssemblyState) error {
 		for _, l := range ast.Lines {
 			l.Assemble(s)
 		}
-		fmt.Printf("resolved %t dirty %t\n", s.resolved, s.dirty)
 	}
 	return nil
 }

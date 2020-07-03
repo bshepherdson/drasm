@@ -52,7 +52,7 @@ func buildDcpuParser() *psec.Grammar {
 	addBinaryOpParsers(g)
 	addUnaryOpParsers(g)
 	g.AddSymbol("instruction",
-		psec.Alt(sym("binary instruction"), sym("unary instruction")))
+		psec.Alt(sym("binary instruction"), sym("unary instruction"), sym("macro use")))
 
 	g.AddSymbol("content",
 		// This backtracking is probably slow, but I'm not sure how to do better.
