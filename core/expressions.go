@@ -76,7 +76,23 @@ func addExprParsers(g *psec.Grammar) {
 		})
 
 	// TODO: hex and binary literals, maybe character literals?
-	g.WithAction("literal", psec.Stringify(psec.Many1(psec.Range('0', '9'))),
+	g.WithAction("hex literal",
+		psec.SeqAt(1, litIC("0x"), psec.Stringify(psec.Many1(sym("hex digit")))),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			i, err := strconv.ParseInt(r.(string), 16, 32)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse integer literal '%s': %v", r, err)
+			}
+
+			if i > 65535 {
+				return nil, fmt.Errorf("numeric literal %x is too big for 16-bit value", i)
+			}
+			return &Constant{Value: uint16(i), Loc: loc}, nil
+		})
+	g.AddSymbol("hex digit", psec.Alt(psec.Range('0', '9'), psec.Range('a', 'f'),
+		psec.Range('A', 'F')))
+
+	g.WithAction("decimal literal", psec.Stringify(psec.Many1(psec.Range('0', '9'))),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			i, err := strconv.ParseInt(r.(string), 10, 32)
 			if err != nil {
@@ -88,6 +104,8 @@ func addExprParsers(g *psec.Grammar) {
 			}
 			return &Constant{Value: uint16(i), Loc: loc}, nil
 		})
+
+	g.AddSymbol("literal", psec.Alt(sym("hex literal"), sym("decimal literal")))
 }
 
 func binaryAction(r interface{}, loc *psec.Loc) (interface{}, error) {

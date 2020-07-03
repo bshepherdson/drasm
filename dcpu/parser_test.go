@@ -95,8 +95,9 @@ func TestLiteral(t *testing.T) {
 	expectExpr(t, dp, "literal", "0", &core.Constant{Value: 0})
 	expectExpr(t, dp, "literal", "12345", &core.Constant{Value: 12345})
 	expectExpr(t, dp, "literal", "65535", &core.Constant{Value: 65535})
-	expectError(t, dp, "literal", "876543",
-		"numeric literal 876543 is too big for 16-bit value")
+
+	expectExpr(t, dp, "literal", "0x7", &core.Constant{Value: 7})
+	expectExpr(t, dp, "literal", "0xbeef", &core.Constant{Value: 0xbeef})
 }
 
 func loc(line, col int) *psec.Loc {
