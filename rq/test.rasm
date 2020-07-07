@@ -13,3 +13,4 @@ bne main
 mov r0, #7     ; Inline MOV
 mov r0, #-3    ; Inline MVN
 mov r0, #7890 ; MOV + MVH
+.dat "asdf"

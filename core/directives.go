@@ -34,11 +34,18 @@ func addDirectiveParsers(g *psec.Grammar) {
 		})
 	g.WithAction("dir:dat",
 		psec.SeqAt(2, litIC("dat"), sym("ws1"),
-			psec.SepBy(sym("expr"), psec.Seq(ws(), lit(","), ws()))),
+			psec.SepBy(psec.Alt(sym("string"), sym("expr")), psec.Seq(ws(), lit(","), ws()))),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			var values []Expression
-			for _, expr := range r.([]interface{}) {
-				values = append(values, expr.(Expression))
+			for _, value := range r.([]interface{}) {
+				if expr, ok := value.(Expression); ok {
+					values = append(values, expr.(Expression))
+				} else if s, ok := value.(string); ok {
+					// Write each byte from the string into our DAT as a Constant.
+					for _, b := range s {
+						values = append(values, &Constant{Value: uint16(b)})
+					}
+				}
 			}
 			return &DatBlock{Values: values}, nil
 		})
