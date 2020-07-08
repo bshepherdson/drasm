@@ -93,7 +93,7 @@ func (op *loadStore) Assemble(s *core.AssemblyState) {
 
 // Exits with an error message if the literal won't fit.
 func checkLiteral(s *core.AssemblyState, expr core.Expression, signed bool, width uint) uint16 {
-	value := expr.Evaluate(s)
+	value := core.Evaluate16(expr, s)
 	loc := expr.Location()
 	if !signed {
 		if value < (1 << width) {

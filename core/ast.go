@@ -7,6 +7,22 @@ import (
 	"github.com/shepheb/psec"
 )
 
+func Fits16(x uint32) bool {
+	return x < 0x10000
+}
+
+func Fits16Signed(x uint32) bool {
+	s := int32(x)
+	return -32768 <= s && s <= 32767
+}
+
+func HighWord(x uint32) uint16 {
+	return uint16(x >> 16)
+}
+func LowWord(x uint32) uint16 {
+	return uint16(x)
+}
+
 // AST captures a complete syntax tree for an assembled file.
 type AST struct {
 	Lines []Assembled
@@ -21,7 +37,7 @@ func (a *AST) Assemble(s *AssemblyState) {
 // Expression evaluates to a number, and keeps track of its location for error
 // messages.
 type Expression interface {
-	Evaluate(s *AssemblyState) uint16
+	Evaluate(s *AssemblyState) uint32
 	Location() *psec.Loc
 	Equals(expr Expression) bool
 }
@@ -33,13 +49,22 @@ type LabelUse struct {
 	loc   *psec.Loc
 }
 
+func Evaluate16(e Expression, s *AssemblyState) uint16 {
+	value := e.Evaluate(s)
+	if Fits16(value) || Fits16Signed(value) {
+		return LowWord(value)
+	}
+	AsmError(e.Location(), "expression value does not fit in 16 bits: %d ($%x)", value)
+	return 0
+}
+
 // UseLabel constructs a LabelUse AST node for where a label is used.
 func UseLabel(label string, loc *psec.Loc) *LabelUse {
 	return &LabelUse{label: label, loc: loc}
 }
 
 // Evaluate resolves the value of a label when it appears in an expression.
-func (l *LabelUse) Evaluate(s *AssemblyState) uint16 {
+func (l *LabelUse) Evaluate(s *AssemblyState) uint32 {
 	value, _, known := s.lookup(l.label)
 	if !known {
 		AsmError(l.loc, "Unknown label '%s'", l.label)
@@ -59,12 +84,12 @@ func (l *LabelUse) Equals(expr Expression) bool {
 
 // Constant is a fixed-value Expression.
 type Constant struct {
-	Value uint16
+	Value uint32
 	Loc   *psec.Loc
 }
 
 // Evaluate for Constant: return the value.
-func (c *Constant) Evaluate(s *AssemblyState) uint16 { return c.Value }
+func (c *Constant) Evaluate(s *AssemblyState) uint32 { return c.Value }
 
 // Location for Constant
 func (c *Constant) Location() *psec.Loc { return c.Loc }
@@ -89,7 +114,7 @@ func Binary(lhs Expression, op Operator, rhs Expression) *BinExpr {
 
 // Evaluate for BinExpr recursively computes the left and right sides and
 // performs the operation.
-func (b *BinExpr) Evaluate(s *AssemblyState) uint16 {
+func (b *BinExpr) Evaluate(s *AssemblyState) uint32 {
 	l := b.lhs.Evaluate(s)
 	r := b.rhs.Evaluate(s)
 	switch b.operator {
@@ -137,7 +162,7 @@ func Unary(operator Operator, expr Expression) *UnaryExpr {
 }
 
 // Evaluate for UnaryExpr
-func (u *UnaryExpr) Evaluate(s *AssemblyState) uint16 {
+func (u *UnaryExpr) Evaluate(s *AssemblyState) uint32 {
 	value := u.expr.Evaluate(s)
 	switch u.operator {
 	case PLUS:
@@ -145,7 +170,7 @@ func (u *UnaryExpr) Evaluate(s *AssemblyState) uint16 {
 	case MINUS:
 		return -value
 	case NOT:
-		return 0xffff ^ value
+		return 0xffffffff ^ value
 	default:
 		panic(fmt.Sprintf("unknown unary operation"))
 	}
@@ -213,7 +238,12 @@ type DatBlock struct{ Values []Expression }
 // Assemble for DatBlock: evaluate and write each one.
 func (b *DatBlock) Assemble(s *AssemblyState) {
 	for _, v := range b.Values {
-		s.Push(v.Evaluate(s))
+		value := v.Evaluate(s)
+		if !Fits16(value) && !Fits16Signed(value) {
+			AsmError(v.Location(), "Dat value does not fit in a single word: %d", value)
+			break
+		}
+		s.Push(LowWord(value))
 	}
 }
 
@@ -227,8 +257,8 @@ type FillBlock struct {
 func (b *FillBlock) Assemble(s *AssemblyState) {
 	len := b.Length.Evaluate(s)
 	val := b.Value.Evaluate(s)
-	for i := uint16(0); i < len; i++ {
-		s.Push(val)
+	for i := uint32(0); i < len; i++ {
+		s.Push(LowWord(val))
 	}
 }
 

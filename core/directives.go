@@ -43,7 +43,7 @@ func addDirectiveParsers(g *psec.Grammar) {
 				} else if s, ok := value.(string); ok {
 					// Write each byte from the string into our DAT as a Constant.
 					for _, b := range s {
-						values = append(values, &Constant{Value: uint16(b)})
+						values = append(values, &Constant{Value: uint32(b)})
 					}
 				}
 			}

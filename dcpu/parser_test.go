@@ -122,7 +122,7 @@ func locCol(col int) *psec.Loc {
 }
 
 func constAt(value uint16, col int) core.Expression {
-	return &core.Constant{Value: value, Loc: locCol(col)}
+	return &core.Constant{Value: uint32(value), Loc: locCol(col)}
 }
 
 func TestExpr1(t *testing.T) {

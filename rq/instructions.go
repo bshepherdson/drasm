@@ -36,7 +36,7 @@ func showArg(arg *arg) string {
 func opRI(loc *psec.Loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
 	if mnemonic == "MOV" {
 		// Special case for MOV: We can encode it as NEG or as MOV+MVH.
-		value := args[1].lit.Evaluate(s)
+		value := core.Evaluate16(args[1].lit, s)
 		if value <= 255 {
 			s.Push((opcode << 11) | (args[0].reg << 8) | value)
 		} else if value > 0xff00 {
@@ -69,8 +69,8 @@ func opVoid(loc *psec.Loc, mnemonic string, opcode uint16, s *core.AssemblyState
 
 func opBranch(loc *psec.Loc, mnemonic string, opcode uint16, args []*arg, s *core.AssemblyState) {
 	// Convert the argument to an absolute address.
-	target := args[0].label.Evaluate(s)
-	diff := target - (s.Index() + 1)
+	target := core.Evaluate16(args[0].label, s)
+	diff := target - (uint16(s.Index()) + 1)
 	// Special case: if the diff happens to be -1, need to use the long form.
 	if diff != 0xffff && (diff < 256 || -diff <= 256) {
 		// Fits into the single instruction.

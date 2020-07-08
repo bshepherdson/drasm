@@ -7,7 +7,7 @@ import "fmt"
 // contains an unknown label, that makes the pass of the assembler unresolved,
 // meaning a second pass is needed.
 type labelRef struct {
-	value   uint16
+	value   uint32
 	defined bool
 }
 
@@ -29,12 +29,12 @@ type AssemblyState struct {
 	// True when something has changed this pass (eg. a label's value).
 	dirty bool
 
-	rom   [65536]uint16
-	index uint16
-	used  map[uint16]bool
+	rom   [16 * 1024 * 1024]uint16
+	index uint32
+	used  map[uint32]bool
 }
 
-func (s *AssemblyState) lookup(key string) (uint16, bool, bool) {
+func (s *AssemblyState) lookup(key string) (uint32, bool, bool) {
 	if lr, ok := s.labels[key]; ok {
 		return lr.value, lr.defined, true
 	}
@@ -48,7 +48,7 @@ func (s *AssemblyState) addLabel(l string) {
 	s.labels[l] = &labelRef{0, false}
 }
 
-func (s *AssemblyState) updateLabel(l string, loc uint16) {
+func (s *AssemblyState) updateLabel(l string, loc uint32) {
 	if lr, ok := s.labels[l]; ok {
 		if !lr.defined || lr.value != loc {
 			s.dirty = true
@@ -60,7 +60,7 @@ func (s *AssemblyState) updateLabel(l string, loc uint16) {
 	}
 }
 
-func (s *AssemblyState) updateSymbol(l string, val uint16) {
+func (s *AssemblyState) updateSymbol(l string, val uint32) {
 	s.symbols[l] = &labelRef{val, true}
 }
 
@@ -69,12 +69,12 @@ func (s *AssemblyState) reset() {
 	s.resolved = true
 	s.dirty = false
 	s.index = 0
-	s.used = make(map[uint16]bool)
+	s.used = make(map[uint32]bool)
 }
 
 // Index gives the address of the next instruction to assemble.
 // That is, a call to Push(x) would write x at this offset in the file.
-func (s *AssemblyState) Index() uint16 {
+func (s *AssemblyState) Index() uint32 {
 	return s.index
 }
 
