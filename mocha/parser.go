@@ -78,21 +78,17 @@ func buildMochaParser() *psec.Grammar {
 
 	g.AddSymbol("comma", psec.Seq(sym("wsline"), lit(","), sym("wsline")))
 
-	g.WithAction("suffix", psec.Alt(litIC(".l"), litIC(".w")),
+	// This only pretends to be optional. It errors if not provided; but the error
+	// message is more detailed.
+	g.WithAction("suffix", psec.Optional(psec.Alt(litIC(".l"), litIC(".w"))),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			if size, ok := r.(string); ok && size == ".l" {
-				return true, nil
+			if size, ok := r.(string); ok {
+				return size == ".l", nil
 			}
-			return false, nil
+			// The detailed "size suffix" error is lost because of sepBy.
+			core.AsmError(loc, "size suffix required")
+			return nil, fmt.Errorf("size suffix required")
 		})
-
-	//g.WithAction("suffix?", psec.Optional(sym("suffix")),
-	//	func(r interface{}, loc *psec.Loc) (interface{}, error) {
-	//		if suffix, ok := r.(bool); ok {
-	//			return suffix, nil
-	//		}
-	//		return false, nil
-	//	})
 
 	addAddressingModeParsers(g)
 	addBinaryOpParsers(g)
@@ -106,7 +102,8 @@ func buildMochaParser() *psec.Grammar {
 	g.AddSymbol("instruction",
 		psec.Alt(sym("binary instruction"), sym("unary instruction"),
 			sym("reg instruction"), sym("nullary instruction"),
-			sym("branch instruction"), sym("set instruction"), sym("lea instruction")))
+			sym("twiddler instruction"), sym("branch instruction"),
+			sym("set instruction"), sym("lea instruction")))
 
 	return g
 }
@@ -354,7 +351,7 @@ func addRegOpParsers(g *psec.Grammar) {
 }
 
 func addNullaryOpParsers(g *psec.Grammar) {
-	g.WithAction("nullary instruction", alts("nop", "rfi", "brk", "hlt", "int"),
+	g.WithAction("nullary instruction", alts("nop", "rfi", "brk", "hlt", "ret"),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			return &nullaryOp{opcode: nullaryOpcodes[r.(string)]}, nil
 		})

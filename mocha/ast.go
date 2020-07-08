@@ -466,6 +466,7 @@ var nullaryOpcodes = map[string]uint16{
 	"rfi": 1,
 	"brk": 2,
 	"hlt": 3,
+	"ret": 4,
 }
 
 type unaryBranchOp struct {
