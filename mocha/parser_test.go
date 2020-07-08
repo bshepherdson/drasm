@@ -36,6 +36,10 @@ func (bits *operandBits) HasEffectiveAddress() bool {
 	return false
 }
 
+func (bits *operandBits) ErrLabel() string {
+	return "raw bits for testing"
+}
+
 func expectAM(t *testing.T, input string, expected operand) {
 	res, err := mp.ParseStringWith("test", input, "operand")
 	if err != nil {
@@ -136,4 +140,107 @@ func TestImmediates(t *testing.T) {
 	// And the special cases for 0 and 1.
 	expectAM(t, "1", &operandBits{mode: 6, regField: 7})
 	expectAM(t, "0", &operandBits{mode: 6, regField: 6})
+}
+
+func expectOp(t *testing.T, rule, input string, expected []uint16) {
+	res, err := mp.ParseStringWith("test", input, rule)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	ast := &core.AST{Lines: []core.Assembled{res.(core.Assembled)}}
+	actual := core.AssembleAst(ast)
+
+	if len(actual) != len(expected) {
+		t.Errorf("expected %d assembled words, got %d", len(expected), len(actual))
+	}
+
+	for i, w := range expected {
+		if w != actual[i] {
+			t.Errorf("expected word %d of the assembly to be %04x, but got %04x",
+				i, w, actual[i])
+		}
+	}
+}
+
+func expectError(t *testing.T, rule, input string) {
+	_, err := mp.ParseStringWith("test", input, rule)
+	if err == nil {
+		t.Errorf("expected error, but got nil")
+	}
+}
+
+func TestBinaryInstructions(t *testing.T) {
+	expectOp(t, "binary instruction", "add.w a, b", []uint16{0x4001})
+	expectOp(t, "binary instruction", "add.w a, [b]", []uint16{0x4009})
+	expectOp(t, "binary instruction", "add.w [a], b", []uint16{0x4188})
+	expectOp(t, "binary instruction", "add.l [a], b", []uint16{0x41c8})
+	// Prefer the regular binary encoding where practical.
+	expectOp(t, "binary instruction", "add.w a, 3", []uint16{0x403a, 3})
+	expectOp(t, "binary instruction", "add.w a, -3", []uint16{0x403a, 0xfffd})
+	// But if it's an  operand and literal, expect the immediate form.
+	expectOp(t, "binary instruction",
+		"add.w [a], -3", []uint16{0x0088, 0xfffd})
+	expectOp(t, "binary instruction",
+		"add.l [a], -3", []uint16{0x00c8, 0xffff, 0xfffd})
+
+	// It fails if both are non-immediate operands.
+	expectError(t, "binary instruction", "add.l [a], [3]")
+	// Or if the binary op doesn't have an immediate version.
+	expectError(t, "binary instruction", "shl.w [a], 3")
+}
+
+func TestBitTwiddlers(t *testing.T) {
+	expectOp(t, "twiddler instruction",
+		"btx.w [123], 9", []uint16{0x0438, 9, 123})
+	expectOp(t, "twiddler instruction",
+		"btc.l [123], b", []uint16{0x0778, 1, 123})
+}
+
+func TestUnaryOps(t *testing.T) {
+	expectOp(t, "unary instruction", "neg.w b", []uint16{0x0981})
+	expectOp(t, "unary instruction", "log.l [pc, c]", []uint16{0x0b7d, 2})
+	expectOp(t, "unary instruction", "pea [pc, c]", []uint16{0x087d, 2})
+	expectError(t, "unary instruction", "pea c")
+}
+
+func TestRegOps(t *testing.T) {
+	expectOp(t, "reg instruction", "hwn x", []uint16{0x0033})
+	expectOp(t, "reg instruction", "lnk x, 212", []uint16{0x0023, 212})
+	expectError(t, "reg instruction", "lnk b")
+	expectError(t, "reg instruction", "hwn b, 1")
+}
+
+func TestUnaryBranchOps(t *testing.T) {
+	expectOp(t, "branch instruction", "bzr.l a, 90",
+		[]uint16{0x0018, 88 << 6})
+	expectOp(t, "branch instruction", "bzr.w [sp + 7], 90",
+		[]uint16{0x0008, (87 << 6) | 0x3e, 7})
+	expectOp(t, "branch instruction", "bzrd.w [sp + 7], 90",
+		[]uint16{0x000c, (87 << 6) | 0x3e, 7})
+
+	expectOp(t, "branch instruction", "sps.l [9]", []uint16{0x001a, 0x0038, 9})
+	expectOp(t, "branch instruction", "sng.w ex", []uint16{0x000b, 0x0032})
+}
+
+func TestBinaryBranchOps(t *testing.T) {
+	expectOp(t, "branch instruction", "ifn.l c, b", []uint16{0x0dc2, 0x0001})
+	expectOp(t, "branch instruction", "brb.w [190000], [x, y], 90",
+		[]uint16{0x0c39, 85<<6 | 0x2b, 4, core.HighWord(190000), core.LowWord(190000)})
+}
+
+func TestSetOps(t *testing.T) {
+	expectOp(t, "instruction", "set.w c, b", []uint16{0x2081})
+	expectOp(t, "instruction", "set.l [c], [b]", []uint16{0x3289})
+	expectOp(t, "instruction", "set.w [c+1], [200000]",
+		[]uint16{0x28b9, core.HighWord(200000), core.LowWord(200000), 1})
+	expectOp(t, "instruction", "set.w c, [200000]",
+		[]uint16{0x20b9, core.HighWord(200000), core.LowWord(200000)})
+
+	expectOp(t, "instruction", "lea c, [200000]",
+		[]uint16{0xc239, core.HighWord(200000), core.LowWord(200000)})
+	expectOp(t, "instruction", "lea c, [pc, x]",
+		[]uint16{0xc23d, 3})
+	expectError(t, "instruction", "lea c, 200")
+	expectError(t, "instruction", "lea c, x")
 }
