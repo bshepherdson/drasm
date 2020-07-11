@@ -1,6 +1,8 @@
 package mocha
 
-import "github.com/shepheb/drasm/core"
+import (
+	"github.com/shepheb/drasm/core"
+)
 
 // Captures the actual values that need assembling for an operand.
 type operandBits struct {
@@ -277,188 +279,186 @@ func (r *spRel) ErrLabel() string {
 // here, so unfortunately this takes a bunch of code to handle all the cases.
 //
 // Broadly, we have these types of operations:
-// - Binary (reg + EA)
-// - SET (2 EAs)
-// - IFx/BRx (2 EAs, optional branch target)
-// - Unary (EA)
-// - Immediates and bit twiddlers (EA + immediate word)
-// - Register only (some with immediate too)
-// - Nullary (immediates again)
+// - Binary short
+// - Binary long
+// - Binary branches
+// - Unary
+// - Unary branches
+// - Nullary
 
-type binary struct {
+type binaryShort struct {
 	opcode    uint16
-	reg       uint16
-	arg       operand
-	argDst    bool
+	dst, src  operand
 	longwords bool
 }
 
-func binaryOp(opcode uint16, arg operand, reg uint16, argDst, longwords bool) *binary {
-	return &binary{
-		opcode:    opcode,
-		reg:       reg,
-		arg:       arg,
-		argDst:    argDst,
+type binaryLong struct {
+	opcode    uint16
+	dst, src  operand
+	longwords bool
+	branch    core.Expression
+}
+
+func binaryOp(opcode string, dst, src operand, longwords bool) core.Assembled {
+	if short, ok := binaryOpcodesShort[opcode]; ok {
+		return &binaryShort{
+			opcode:    short,
+			dst:       dst,
+			src:       src,
+			longwords: longwords,
+		}
+	}
+	long := binaryOpcodesLong[opcode]
+	return &binaryLong{
+		opcode:    long,
+		dst:       dst,
+		src:       src,
 		longwords: longwords,
 	}
 }
 
-var binaryOpcodes = map[string]uint16{
-	"add": 8,
-	"adx": 9,
-	"sub": 10,
-	"sbx": 11,
-	"mul": 12,
-	"mli": 13,
-	"div": 14,
-	"dvi": 15,
-	"and": 16,
-	"bor": 17,
-	"xor": 18,
-	"shr": 19,
-	"asr": 20,
-	"shl": 21,
+var binaryOpcodesShort = map[string]uint16{
+	"set": 1,
+	"add": 2,
+	"sub": 3,
+	"and": 4,
+	"bor": 5,
+	"xor": 6,
+}
+
+var binaryOpcodesLong = map[string]uint16{
+	"adx": 0,
+	"sbx": 1,
+	"shr": 2,
+	"asr": 3,
+	"shl": 4,
+	"mul": 5,
+	"mli": 6,
+	"div": 7,
+	"dvi": 8,
+	"lea": 9,
+	"btx": 10,
+	"bts": 11,
+	"btc": 12,
+	"bvm": 13,
+	"ifb": 16,
+	"ifc": 17,
+	"ife": 18,
+	"ifn": 19,
+	"ifg": 20,
+	"ifa": 21,
+	"ifl": 22,
+	"ifu": 23,
 }
 
 const (
-	lFlag uint16 = 0x40 // Its commonest position, bit 6.
+	lFlag uint16 = 0x8000 // Its commonest position, bit 6.
 )
 
-func (b *binary) Assemble(s *core.AssemblyState) {
-	bits := b.arg.Encode(s)
-	word := (b.opcode << 11) | (b.reg << 8) | bits.eaField()
+func (b *binaryShort) Assemble(s *core.AssemblyState) {
+	srcBits := b.src.Encode(s)
+	dstBits := b.dst.Encode(s)
+	word := (b.opcode << 12) | (dstBits.eaField() << 6) | srcBits.eaField()
 	if b.longwords {
 		word |= lFlag
 	}
-	if b.argDst {
-		word |= 0x80
-	}
 	s.Push(word)
-	bits.assembleExtras(s)
+	srcBits.assembleExtras(s)
+	dstBits.assembleExtras(s)
 }
 
-type binaryImmediate struct {
-	opcode    uint16
-	literal   core.Expression
-	dst       operand
-	longwords bool
-}
-
-func immediateOp(opcode uint16, dst operand, lit core.Expression, longwords bool) *binaryImmediate {
-	return &binaryImmediate{
-		opcode:    opcode,
-		literal:   lit,
-		dst:       dst,
-		longwords: longwords,
-	}
-}
-
-var immediateOpcodes = map[string]uint16{
-	"add": 1,
-	"sub": 2,
-	"and": 3,
-	"bor": 4,
-	"xor": 5,
-}
-
-func (b *binaryImmediate) Assemble(s *core.AssemblyState) {
-	bits := b.dst.Encode(s)
-	word := b.opcode<<7 | bits.eaField()
-	if b.longwords {
-		word |= lFlag
-	}
-
-	s.Push(word)
-	value := b.literal.Evaluate(s)
-	if b.longwords {
-		s.Push(core.HighWord(value))
-		s.Push(core.LowWord(value))
-	} else {
-		s.Push(core.LowWord(value))
-	}
-
-	bits.assembleExtras(s)
-}
-
-var bitTwiddlerOpcodes = map[string]uint16{
-	"btx": 0,
-	"bts": 1,
-	"btc": 2,
-	"btm": 3,
-}
-
-type bitTwiddlerOp struct {
-	opcode    uint16
-	longwords bool
-	dst       operand
-	bit       core.Expression
-}
-
-func (b *bitTwiddlerOp) Assemble(s *core.AssemblyState) {
-	bits := b.dst.Encode(s)
-	word := 0x0400 | (b.opcode << 7) | bits.eaField()
+func (b *binaryLong) Assemble(s *core.AssemblyState) {
+	srcBits := b.src.Encode(s)
+	dstBits := b.dst.Encode(s)
+	word := 0x7000 | (dstBits.eaField() << 6) | srcBits.eaField()
 	if b.longwords {
 		word |= lFlag
 	}
 	s.Push(word)
 
-	value := core.Evaluate16(b.bit, s)
-	s.Push(value)
+	nextWord := b.opcode
+	if b.branch != nil {
+		target := b.branch.Evaluate(s)
+		base := s.Index() + 1 // Just after this word, ie. where PC will point.
+		delta := int32(target) - int32(base)
 
-	bits.assembleExtras(s)
+		// The space is 11 bits signed, so make sure it'll fit.
+		// That's -1024 to 1023
+		if delta < -1024 || delta > 1023 {
+			core.AsmError(b.branch.Location(), "Branch target is too far away (-1024 to 1023), need %d", delta)
+		}
+		nextWord |= uint16(delta << 5)
+	}
+	s.Push(nextWord)
+	srcBits.assembleExtras(s)
+	dstBits.assembleExtras(s)
 }
 
 type unaryOp struct {
-	opcode uint16 // The low bit of this is considered the longwords bit by some.
-	dst    operand
+	opcode    uint16
+	dst       operand
+	longwords bool
+	branch    core.Expression
 }
 
 func (b *unaryOp) Assemble(s *core.AssemblyState) {
 	bits := b.dst.Encode(s)
-	s.Push(0x0800 | (b.opcode << 6) | bits.eaField())
+	word := (b.opcode << 6) | bits.eaField()
+	if b.longwords {
+		word |= lFlag
+	}
+	s.Push(word)
+
+	if b.branch != nil {
+		// 16-bit signed value.
+		target := b.branch.Evaluate(s)
+		base := s.Index() + 1 // Address after this word is written.
+		delta := int32(target) - int32(base)
+		if delta < -65536 || delta > 65535 {
+			core.AsmError(b.branch.Location(), "Branch target is too far away (+/- 64K), need %d", delta)
+		}
+		s.Push(uint16(delta))
+	}
+
 	bits.assembleExtras(s)
 }
 
 var unaryOpcodes = map[string]uint16{
-	"swp": 0,
-	"pea": 1,
-	"ext": 2,
-	"int": 3,
-	// Then for these the low bit is the L flag; we give the number with L clear.
-	"not": 4,
-	"neg": 6,
-	"jsr": 8,
-	"iaq": 10,
-	"log": 12,
-	"hwi": 14,
-}
-
-type regOp struct {
-	opcode   uint16
-	reg      uint16
-	linkWord core.Expression
-}
-
-func (b *regOp) Assemble(s *core.AssemblyState) {
-	s.Push(0x0020 | (b.opcode << 3) | b.reg)
-	if b.opcode == regOpcodes["lnk"] {
-		s.Push(core.Evaluate16(b.linkWord, s))
-	}
-}
-
-var regOpcodes = map[string]uint16{
-	"lnk": 0,
-	"ulk": 1,
-	"hwn": 2,
-	"hwq": 3,
+	"swp": 1,
+	"pea": 2,
+	"not": 3,
+	"neg": 4,
+	"jsr": 5,
+	"log": 6,
+	"lnk": 7,
+	"hwn": 9,
+	"hwq": 10,
+	"hwi": 11,
+	"int": 12,
+	"iaq": 13,
+	"ext": 14,
+	// Branches
+	"bzr":  0x20,
+	"bnz":  0x21,
+	"bps":  0x22,
+	"bng":  0x23,
+	"bzrd": 0x24,
+	"bnzd": 0x25,
+	"bpsd": 0x26,
+	"bngd": 0x27,
 }
 
 type nullaryOp struct {
-	opcode uint16
+	opcode    uint16
+	longwords bool
 }
 
 func (b *nullaryOp) Assemble(s *core.AssemblyState) {
-	s.Push(b.opcode)
+	word := b.opcode
+	if b.longwords {
+		word |= lFlag
+	}
+	s.Push(word)
 }
 
 var nullaryOpcodes = map[string]uint16{
@@ -466,136 +466,16 @@ var nullaryOpcodes = map[string]uint16{
 	"rfi": 1,
 	"brk": 2,
 	"hlt": 3,
-	"ret": 4,
-}
-
-type unaryBranchOp struct {
-	opcode    uint16
-	longwords bool
-	dst       operand
-	target    core.Expression
-}
-
-func (b *unaryBranchOp) Assemble(s *core.AssemblyState) {
-	word := b.opcode
-	if b.longwords {
-		word |= 0x10 // Not the usual position for the L bit.
-	}
-	s.Push(word)
-
-	bits := b.dst.Encode(s)
-	s.Push(bits.eaField() | buildBranchWord(s, len(bits.extraWords), b.target))
-	bits.assembleExtras(s)
-}
-
-func buildBranchWord(s *core.AssemblyState, extras int, target core.Expression) uint16 {
-	var branchWord uint16
-
-	if target != nil {
-		// This is a branch, so compute the target.
-		// Branch target is relative to PC after the end of this whole instruction.
-		// s.Index is aimed at where the branch word will go, right now.
-		base := int(s.Index()) + 1 + extras
-		value := target.Evaluate(s)
-		diff := int32(value) - int32(base)
-
-		// There's only 10 bits available for the signed value, -512 to 511.
-		if diff < -512 || diff > 511 {
-			core.AsmError(target.Location(), "branch target is too far away (%d words), use skip + set pc instead", diff)
-		}
-
-		branchWord |= (uint16(diff & 0x3ff)) << 6
-	}
-
-	return branchWord
-}
-
-var unaryBranchOpcodes = map[string]uint16{
-	"bzr":  8,
-	"bnz":  9,
-	"bps":  10,
-	"bng":  11,
-	"bzrd": 12,
-	"bnzd": 13,
-	"bpsd": 14,
-	"bngd": 15,
-	"szr":  8,
-	"snz":  9,
-	"sps":  10,
-	"sng":  11,
-	"szrd": 12,
-	"snzd": 13,
-	"spsd": 14,
-	"sngd": 15,
-}
-
-type binaryBranchOp struct {
-	opcode    uint16
-	longwords bool
-	left      operand
-	right     operand
-	target    core.Expression
-}
-
-func (b *binaryBranchOp) Assemble(s *core.AssemblyState) {
-	leftBits := b.left.Encode(s)
-	rightBits := b.right.Encode(s)
-	word := 0x0c00 | (b.opcode << 7) | leftBits.eaField()
-	if b.longwords {
-		word |= lFlag
-	}
-	s.Push(word)
-	extras := len(leftBits.extraWords) + len(rightBits.extraWords)
-	s.Push(rightBits.eaField() | buildBranchWord(s, extras, b.target))
-	rightBits.assembleExtras(s)
-	leftBits.assembleExtras(s)
+	"ulk": 4,
 }
 
 var binaryBranchOpcodes = map[string]uint16{
-	"brb": 0,
-	"brc": 1,
-	"bre": 2,
-	"brn": 3,
-	"brg": 4,
-	"bra": 5,
-	"brl": 6,
-	"bru": 7,
-	"ifb": 0,
-	"ifc": 1,
-	"ife": 2,
-	"ifn": 3,
-	"ifg": 4,
-	"ifa": 5,
-	"ifl": 6,
-	"ifu": 7,
-}
-
-type setOp struct {
-	longwords bool
-	src       operand
-	dst       operand
-}
-
-func (b *setOp) Assemble(s *core.AssemblyState) {
-	srcBits := b.src.Encode(s)
-	dstBits := b.dst.Encode(s)
-	word := 0x2000 | (dstBits.eaField() << 6) | srcBits.eaField()
-	if b.longwords {
-		word |= 0x1000 // Not the usual spot.
-	}
-
-	s.Push(word)
-	srcBits.assembleExtras(s)
-	dstBits.assembleExtras(s)
-}
-
-type leaOp struct {
-	reg uint16
-	src operand
-}
-
-func (b *leaOp) Assemble(s *core.AssemblyState) {
-	srcBits := b.src.Encode(s)
-	s.Push(0xc000 | (b.reg << 8) | srcBits.eaField())
-	srcBits.assembleExtras(s)
+	"brb": 0x10,
+	"brc": 0x11,
+	"bre": 0x12,
+	"brn": 0x13,
+	"brg": 0x14,
+	"bra": 0x15,
+	"brl": 0x16,
+	"bru": 0x17,
 }

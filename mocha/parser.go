@@ -80,30 +80,21 @@ func buildMochaParser() *psec.Grammar {
 
 	// This only pretends to be optional. It errors if not provided; but the error
 	// message is more detailed.
-	g.WithAction("suffix", psec.Optional(psec.Alt(litIC(".l"), litIC(".w"))),
+	g.WithAction("suffix", psec.OneOf("lwLW"),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			if size, ok := r.(string); ok {
-				return size == ".l", nil
-			}
-			// The detailed "size suffix" error is lost because of sepBy.
-			core.AsmError(loc, "size suffix required")
-			return nil, fmt.Errorf("size suffix required")
+			size := r.(byte)
+			return size == 'l' || size == 'L', nil
 		})
 
 	addAddressingModeParsers(g)
 	addBinaryOpParsers(g)
-	addBitTwiddlerParsers(g)
 	addUnaryOpParsers(g)
-	addRegOpParsers(g)
 	addNullaryOpParsers(g)
 	addBranchOpParsers(g)
-	addSetOpParsers(g)
 
 	g.AddSymbol("instruction",
 		psec.Alt(sym("binary instruction"), sym("unary instruction"),
-			sym("reg instruction"), sym("nullary instruction"),
-			sym("twiddler instruction"), sym("branch instruction"),
-			sym("set instruction"), sym("lea instruction")))
+			sym("nullary instruction"), sym("branch instruction")))
 
 	return g
 }
@@ -223,81 +214,35 @@ func addAddressingModeParsers(g *psec.Grammar) {
 }
 
 func addBinaryOpParsers(g *psec.Grammar) {
-	g.AddSymbol("binary opcodes", psec.Alt(
-		litIC("add"), litIC("adx"), litIC("sub"), litIC("sbx"), litIC("mul"),
-		litIC("mli"), litIC("div"), litIC("dvi"), litIC("and"), litIC("bor"),
-		litIC("xor"), litIC("shr"), litIC("shl"), litIC("asr")))
+	g.AddSymbol("binary opcodes", alts("set", "add", "sub", "and", "bor", "xor",
+		"adx", "sbx", "shr", "asr", "shl", "mul", "mli", "div", "dvi", "lea", "btx",
+		"bts", "btc", "btm", "ifb", "ifc", "ife", "ifn", "ifg", "ifa", "ifl", "ifu"))
 
 	g.WithAction("binary instruction", psec.Seq(sym("binary opcodes"),
 		sym("suffix"), sym("ws1"), sym("operand"), sym("comma"), sym("operand")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			// Both parts will parse initially as fully operands, since we need more
-			// complex logic to determine whether it can be encoded properly.
 			rs := r.([]interface{})
+			//fmt.Printf("%#v\n", rs)
 			opcode := rs[0].(string)
 			longwords := rs[1].(bool)
 			dst := rs[3].(operand)
 			src := rs[5].(operand)
 
-			// ADD, SUB, AND, BOR and XOR have an "immediate" form, so they can
-			// support both arguments being complex operands.
-			if isDirectReg(dst) {
-				return binaryOp(binaryOpcodes[opcode], src, dst.(*regSimple).reg,
-					false, longwords), nil
-			}
-			if isDirectReg(src) {
-				return binaryOp(binaryOpcodes[opcode], dst, src.(*regSimple).reg,
-					true, longwords), nil
-			}
-
-			// If the src value is a literal, we can use the immediate form.
-			if lit, ok := src.(*immediate); ok && !lit.indirect {
-				// Only some operations are supported, so check.
-				op, ok := immediateOpcodes[opcode]
-				if ok {
-					return immediateOp(op, dst, lit.value, longwords), nil
-				}
-			}
-
-			// Otherwise, this is not a legal combination.
-			return nil, fmt.Errorf("cannot assemble %s %s, %s, one argument must be a register", opcode, dst.ErrLabel(), src.ErrLabel())
+			return binaryOp(opcode, dst, src, longwords), nil
 		})
 }
 
-func addBitTwiddlerParsers(g *psec.Grammar) {
-	g.AddSymbol("twiddler opcode", alts("btx", "bts", "btc", "btm"))
+func addUnaryOpParsers(g *psec.Grammar) {
+	g.AddSymbol("unary opcodes", alts("swp", "pea", "not", "neg", "jsr", "log",
+		"lnk", "hwn", "hwq", "hwi", "int", "iaq", "ext"))
 
-	g.WithAction("twiddler instruction",
-		psec.Seq(sym("twiddler opcode"), sym("suffix"), sym("ws1"),
-			sym("operand"), sym("comma"), psec.Alt(sym("gpReg"), sym("expr"))),
+	g.WithAction("unary instruction", psec.Seq(
+		sym("unary opcodes"), sym("suffix"), sym("ws1"), sym("operand")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			rs := r.([]interface{})
 			op := rs[0].(string)
 			longwords := rs[1].(bool)
 			dst := rs[3].(operand)
-
-			opcode := bitTwiddlerOpcodes[op]
-			expr, ok := rs[5].(core.Expression)
-			if !ok {
-				// Abusing the literal form.
-				expr = &core.Constant{Value: uint32(rs[5].(*regSimple).reg)}
-				opcode |= 4 // The register versions are above the immediate ones.
-			}
-
-			return &bitTwiddlerOp{opcode: opcode, longwords: longwords, dst: dst, bit: expr}, nil
-		})
-}
-
-func addUnaryOpParsers(g *psec.Grammar) {
-	g.AddSymbol("unary basic opcodes", alts("swp", "pea", "ext", "int"))
-	g.AddSymbol("unary suffixed opcodes", alts("not", "neg", "jsr", "iaq", "log", "hwi"))
-
-	g.WithAction("unary basic instruction", psec.Seq(
-		sym("unary basic opcodes"), sym("ws1"), sym("operand")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			op := rs[0].(string)
-			dst := rs[2].(operand)
 
 			if op == "pea" && !dst.HasEffectiveAddress() {
 				return nil, fmt.Errorf("cannot use PEA with %s; it has no address",
@@ -305,53 +250,15 @@ func addUnaryOpParsers(g *psec.Grammar) {
 			}
 
 			return &unaryOp{
-				opcode: unaryOpcodes[rs[0].(string)],
-				dst:    rs[2].(operand),
+				opcode:    unaryOpcodes[op],
+				dst:       dst,
+				longwords: longwords,
 			}, nil
-		})
-
-	g.WithAction("unary suffixed instruction", psec.Seq(
-		sym("unary suffixed opcodes"), sym("suffix"), sym("ws1"), sym("operand")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			opcode := unaryOpcodes[rs[0].(string)]
-			if rs[1].(bool) {
-				opcode |= 1 // Mix in the L bit.
-			}
-
-			return &unaryOp{opcode: opcode, dst: rs[3].(operand)}, nil
-		})
-
-	g.AddSymbol("unary instruction", psec.Alt(
-		sym("unary basic instruction"), sym("unary suffixed instruction")))
-}
-
-func addRegOpParsers(g *psec.Grammar) {
-	g.AddSymbol("reg instruction",
-		psec.Alt(sym("lnk instruction"), sym("reg instruction 2")))
-
-	g.AddSymbol("reg opcodes", alts("ulk", "hwn", "hwq"))
-	g.WithAction("reg instruction 2", psec.Seq(
-		sym("reg opcodes"), sym("ws1"), sym("gpReg")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			opcode := regOpcodes[rs[0].(string)]
-			reg := rs[2].(*regSimple)
-			return &regOp{opcode: opcode, reg: reg.reg}, nil
-		})
-
-	g.WithAction("lnk instruction", psec.Seq(
-		litIC("lnk"), sym("ws1"), sym("gpReg"), sym("comma"), sym("expr")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			reg := rs[2].(*regSimple)
-			expr := rs[4].(core.Expression)
-			return &regOp{opcode: regOpcodes["lnk"], reg: reg.reg, linkWord: expr}, nil
 		})
 }
 
 func addNullaryOpParsers(g *psec.Grammar) {
-	g.WithAction("nullary instruction", alts("nop", "rfi", "brk", "hlt", "ret"),
+	g.WithAction("nullary instruction", alts("nop", "rfi", "brk", "hlt", "ulk"),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			return &nullaryOp{opcode: nullaryOpcodes[r.(string)]}, nil
 		})
@@ -362,37 +269,23 @@ func addBranchOpParsers(g *psec.Grammar) {
 	addBinaryBranchParsers(g)
 
 	g.AddSymbol("branch instruction",
-		psec.Alt(sym("unary branch instruction"), sym("unary skip instruction"),
-			sym("binary branch instruction"), sym("binary skip instruction")))
+		psec.Alt(sym("unary branch instruction"), sym("binary branch instruction")))
 }
 
 func addUnaryBranchParsers(g *psec.Grammar) {
 	g.AddSymbol("unary branch opcode",
-		alts("bzrd", "bnzd", "bngd", "bpsd", "bzr", "bnz", "bpo", "bng"))
+		alts("bzrd", "bnzd", "bngd", "bpsd", "bzr", "bnz", "bps", "bng"))
 
 	g.WithAction("unary branch instruction", psec.Seq(
 		sym("unary branch opcode"), sym("suffix"), sym("ws1"), sym("operand"),
 		sym("comma"), sym("expr")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			rs := r.([]interface{})
-			return &unaryBranchOp{
-				opcode:    unaryBranchOpcodes[rs[0].(string)],
+			return &unaryOp{
+				opcode:    unaryOpcodes[rs[0].(string)],
 				longwords: rs[1].(bool),
 				dst:       rs[3].(operand),
-				target:    rs[5].(core.Expression),
-			}, nil
-		})
-
-	g.AddSymbol("unary skip opcode",
-		alts("szrd", "snzd", "sngd", "spsd", "szr", "snz", "sps", "sng"))
-	g.WithAction("unary skip instruction", psec.Seq(
-		sym("unary skip opcode"), sym("suffix"), sym("ws1"), sym("operand")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			return &unaryBranchOp{
-				opcode:    unaryBranchOpcodes[rs[0].(string)],
-				longwords: rs[1].(bool),
-				dst:       rs[3].(operand),
+				branch:    rs[5].(core.Expression),
 			}, nil
 		})
 }
@@ -405,53 +298,12 @@ func addBinaryBranchParsers(g *psec.Grammar) {
 		sym("operand"), sym("comma"), sym("operand"), sym("comma"), sym("expr")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			rs := r.([]interface{})
-			return &binaryBranchOp{
+			return &binaryLong{
 				opcode:    binaryBranchOpcodes[rs[0].(string)],
 				longwords: rs[1].(bool),
-				left:      rs[3].(operand),
-				right:     rs[5].(operand),
-				target:    rs[7].(core.Expression),
-			}, nil
-		})
-
-	g.AddSymbol("binary skip opcode",
-		alts("ifb", "ifc", "ife", "ifn", "ifg", "ifa", "ifl", "ifu"))
-	g.WithAction("binary skip instruction", psec.Seq(
-		sym("binary skip opcode"), sym("suffix"), sym("ws1"),
-		sym("operand"), sym("comma"), sym("operand")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			return &binaryBranchOp{
-				opcode:    binaryBranchOpcodes[rs[0].(string)],
-				longwords: rs[1].(bool),
-				left:      rs[3].(operand),
-				right:     rs[5].(operand),
-			}, nil
-		})
-}
-
-func addSetOpParsers(g *psec.Grammar) {
-	g.WithAction("set instruction", psec.Seq(
-		litIC("set"), sym("suffix"), sym("ws1"), sym("operand"), sym("comma"), sym("operand")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			return &setOp{
-				longwords: rs[1].(bool),
-				src:       rs[5].(operand),
 				dst:       rs[3].(operand),
+				src:       rs[5].(operand),
+				branch:    rs[7].(core.Expression),
 			}, nil
-		})
-
-	g.WithAction("lea instruction", psec.Seq(
-		litIC("lea"), sym("ws1"), sym("gpReg"), sym("comma"), sym("operand")),
-		func(r interface{}, loc *psec.Loc) (interface{}, error) {
-			rs := r.([]interface{})
-			src := rs[4].(operand)
-			if !src.HasEffectiveAddress() {
-				return nil, fmt.Errorf("cannot use LEA with %s; it has no address",
-					src.ErrLabel())
-			}
-
-			return &leaOp{reg: rs[2].(*regSimple).reg, src: src}, nil
 		})
 }
