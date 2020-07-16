@@ -48,6 +48,7 @@ func doMacro(s *AssemblyState, name string, args []string) (string, error) {
 
 	text = strings.ReplaceAll(text, "%n", "\n")
 
+	//fmt.Printf("Macro: %s %v\n%s\n=========\n", name, args, text)
 	return text, nil
 }
 
@@ -56,7 +57,8 @@ func addMacroParsers(g *psec.Grammar) {
 	// list, but the name must be defined as a macro or the action errors out.
 	// This rule should be used as the last option for a legal line of assembly.
 	g.WithAction("macro use",
-		psec.Seq(sym("identifier"), sym("wsline"), psec.SepBy(psec.Stringify(psec.Many1(psec.NoneOf(",;\n"))), lit(","))),
+		psec.Seq(sym("identifier"), psec.Optional(
+			psec.SeqAt(1, sym("ws1"), psec.SepBy(psec.Stringify(psec.Many1(psec.NoneOf(",;\n"))), lit(","))))),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			rs := r.([]interface{})
 			macro := rs[0].(string)
@@ -65,9 +67,11 @@ func addMacroParsers(g *psec.Grammar) {
 			}
 
 			var args []string
-			for _, arg := range rs[2].([]interface{}) {
-				args = append(args, arg.(string))
+			if rawArgs, ok := rs[1].([]interface{}); ok {
+				for _, arg := range rawArgs {
+					args = append(args, strings.TrimSpace(arg.(string)))
+				}
 			}
-			return &MacroUse{macro: macro, args: args}, nil
+			return &MacroUse{macro: macro, args: args, loc: loc}, nil
 		})
 }

@@ -6,6 +6,13 @@ import (
 	"github.com/shepheb/psec"
 )
 
+// ReservedWordsFn is the type for ReservedWords
+type ReservedWordsFn func(ident string) bool
+
+// ReservedWords should be set by the downstream parsers, defining what
+// identifiers are considered illegal.
+var ReservedWords ReservedWordsFn = func(ident string) bool { return false }
+
 // AddBasicParsers sets up most of the core structures needed by the assembler's
 // parser.
 // The machine-specific parser is only responsible for parsing instructions.
@@ -31,7 +38,11 @@ func AddBasicParsers(g *psec.Grammar) {
 		psec.Stringify(psec.Many(psec.Alt(psec.Range('0', '9'), sym("letterish"))))),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			rs := r.([]interface{})
-			return fmt.Sprintf("%c%s", rs[0].(byte), rs[1].(string)), nil
+			s := fmt.Sprintf("%c%s", rs[0].(byte), rs[1].(string))
+			if ReservedWords(s) {
+				return "", fmt.Errorf("reserved word")
+			}
+			return s, nil
 		})
 
 	g.WithAction("label",
@@ -45,24 +56,39 @@ func AddBasicParsers(g *psec.Grammar) {
 
 	g.AddSymbol("content",
 		// This backtracking is probably slow, but I'm not sure how to do better.
-		psec.Alt(sym("directive"), sym("labeled instruction"), sym("label")))
+		psec.Alt(sym("comment"), sym("labeled directive"), sym("labeled instruction"), sym("label")))
 
 	g.WithAction("labeled instruction",
-		psec.Seq(psec.Many(psec.SeqAt(0, sym("label"), sym("ws1"))), sym("instruction")),
+		psec.Seq(sym("wsline"), psec.Many(psec.SeqAt(0, sym("label"), sym("ws1"))), sym("instruction")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			// Returns either a single instruction, or a list of Assembled values,
 			// for the labels and then the instruction.
 			rs := r.([]interface{})
-			if rs[0] == nil {
-				return rs[1], nil
+			if rs[1] == nil {
+				return rs[2], nil
 			}
 
-			labels := rs[0].([]interface{})
+			labels := rs[1].([]interface{})
 			if len(labels) == 0 {
-				return rs[1], nil
+				return rs[2], nil
 			}
 
-			return append(labels, rs[1]), nil
+			return append(labels, rs[2]), nil
+		})
+
+	g.WithAction("labeled directive",
+		psec.Seq(sym("wsline"), psec.Many(psec.SeqAt(0, sym("label"), sym("ws1"))), sym("directive")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			rs := r.([]interface{})
+			if rs[1] == nil {
+				return rs[2], nil
+			}
+
+			labels := rs[1].([]interface{})
+			if len(labels) == 0 {
+				return rs[2], nil
+			}
+			return append(labels, rs[2]), nil
 		})
 
 	// The preamble or postamble, whitespace and comments on either end of a file.

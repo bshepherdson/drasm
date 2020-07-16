@@ -2,6 +2,7 @@ package mocha
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/shepheb/drasm/core"
 	"github.com/shepheb/psec"
@@ -50,9 +51,31 @@ var regNumbers = map[byte]uint16{
 	'j': 7,
 }
 
+var keywords = []string{"push", "pop", "peek", "pick", "pc", "ex", "sp", "ia"}
+
+// Returns true if this
+func reservedWords(s string) bool {
+	lc := strings.ToLower(s)
+	if len(s) == 1 {
+		for _, b := range "abcxyzij" {
+			if lc[0] == byte(b) {
+				return true
+			}
+		}
+	}
+
+	for _, res := range keywords {
+		if lc == res {
+			return true
+		}
+	}
+	return false
+}
+
 func buildMochaParser() *psec.Grammar {
 	g := psec.NewGrammar()
 	core.AddBasicParsers(g)
+	core.ReservedWords = reservedWords
 
 	g.WithAction("gpReg", psec.OneOf("ABCXYZIJabcxyzij"),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
@@ -93,17 +116,19 @@ func buildMochaParser() *psec.Grammar {
 	addBranchOpParsers(g)
 
 	g.AddSymbol("instruction",
-		psec.Alt(sym("binary instruction"), sym("unary instruction"),
-			sym("nullary instruction"), sym("branch instruction")))
+		psec.Alt(sym("macro use"), sym("binary instruction"),
+			sym("unary instruction"), sym("nullary instruction"),
+			sym("branch instruction")))
 
 	return g
 }
 
 func addAddressingModeParsers(g *psec.Grammar) {
 	g.AddSymbol("operand",
-		psec.Alt(sym("am push/pop"), sym("am peek"), sym("am special reg"),
-			sym("am pc-rel"), sym("am sp-rel"), sym("gpReg"), sym("am reg increment"),
-			sym("am reg indirect"), sym("am lit indirect"), sym("am lit")))
+		psec.Alt(sym("am lit"), sym("am push/pop"), sym("am peek"),
+			sym("am special reg"), sym("am pc-rel"), sym("am sp-rel"), sym("gpReg"),
+			sym("am reg increment"), sym("am reg indirect"), sym("am lit indirect"),
+			sym("am reglist")))
 
 	g.WithAction("am push/pop", psec.Alt(litIC("push"), litIC("pop"),
 		litIC("-[SP]"), litIC("[SP]+")),
@@ -211,6 +236,30 @@ func addAddressingModeParsers(g *psec.Grammar) {
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			return &immediate{value: r.(core.Expression)}, nil
 		})
+
+	// This is not really an addressing mode, it's just a curious way of writing
+	// a literal argument.
+	g.WithAction("am reglist", psec.SeqAt(2, lit("{"), sym("wsline"),
+		psec.SepBy(psec.Alt(sym("gpReg"), sym("pc"), sym("ex")), sym("comma")),
+		sym("wsline"), lit("}")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			rs := r.([]interface{})
+			// These are either *specialReg or *regDirect.
+			var bitmap uint16
+			for _, item := range rs {
+				if reg, ok := item.(*regSimple); ok {
+					bitmap |= 1 << reg.reg
+				} else if spec, ok := item.(*specialReg); ok {
+					if spec.ex {
+						bitmap |= 0x100
+					} else if spec.pc {
+						bitmap |= 0x200
+					}
+				}
+			}
+
+			return &immediate{value: &core.Constant{Value: uint32(bitmap)}}, nil
+		})
 }
 
 func addBinaryOpParsers(g *psec.Grammar) {
@@ -234,7 +283,7 @@ func addBinaryOpParsers(g *psec.Grammar) {
 
 func addUnaryOpParsers(g *psec.Grammar) {
 	g.AddSymbol("unary opcodes", alts("swp", "pea", "not", "neg", "jsr", "log",
-		"lnk", "hwn", "hwq", "hwi", "int", "iaq", "ext"))
+		"lnk", "hwn", "hwq", "hwi", "int", "iaq", "ext", "psh", "pop", "clr"))
 
 	g.WithAction("unary instruction", psec.Seq(
 		sym("unary opcodes"), sym("suffix"), sym("ws1"), sym("operand")),

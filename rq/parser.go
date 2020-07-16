@@ -79,10 +79,10 @@ func buildRisqueParser() *psec.Grammar {
 		"MOV", "MVH", "MVN", "NEG", "XSR",
 		"ADD", "ADC", "SUB", "SBC", "MUL",
 		"LSL", "LSR", "ASR", "AND", "ORR", "XOR", "ROR",
-		"CMP", "CMN", "TST",
+		"CMP", "CMN", "TST", "BRK",
 		"BEQ", "BNE", "BCS", "BCC", "BMI", "BPL", "BVS", "BVC",
 		"BHI", "BLS", "BGE", "BLT", "BGT", "BLE",
-		"RET", "BX", "BLX", "B", "BL",
+		"RET", "BX", "BLX", "BL", "B",
 		"HWN", "HWQ", "HWI", "SWI", "RFI",
 		"IFC", "IFS", "POPSP",
 	}

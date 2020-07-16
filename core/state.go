@@ -27,7 +27,8 @@ type AssemblyState struct {
 	// True when all labels are resolved, false otherwise.
 	resolved bool
 	// True when something has changed this pass (eg. a label's value).
-	dirty bool
+	dirty       bool
+	dirtyLabels []string
 
 	rom   [16 * 1024 * 1024]uint16
 	index uint32
@@ -45,13 +46,16 @@ func (s *AssemblyState) lookup(key string) (uint32, bool, bool) {
 }
 
 func (s *AssemblyState) addLabel(l string) {
-	s.labels[l] = &labelRef{0, false}
+	if _, ok := s.labels[l]; !ok {
+		s.labels[l] = &labelRef{0, false}
+	}
 }
 
 func (s *AssemblyState) updateLabel(l string, loc uint32) {
 	if lr, ok := s.labels[l]; ok {
 		if !lr.defined || lr.value != loc {
 			s.dirty = true
+			s.dirtyLabels = append(s.dirtyLabels, l)
 		}
 		lr.value = loc
 		lr.defined = true
@@ -68,6 +72,7 @@ func (s *AssemblyState) reset() {
 	s.symbols = make(map[string]*labelRef)
 	s.resolved = true
 	s.dirty = false
+	s.dirtyLabels = nil
 	s.index = 0
 	s.used = make(map[uint32]bool)
 }
@@ -88,6 +93,10 @@ func (s *AssemblyState) Push(x uint16) {
 	s.used[s.index] = true
 	s.rom[s.index] = x
 	s.index++
+}
+
+func (s *AssemblyState) MarkDirty() {
+	s.dirty = true
 }
 
 func (s *AssemblyState) addMacro(name, body string) {

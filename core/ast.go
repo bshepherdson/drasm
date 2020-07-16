@@ -126,6 +126,10 @@ func (b *BinExpr) Evaluate(s *AssemblyState) uint32 {
 		return l * r
 	case DIVIDE:
 		return l / r
+	case LANGLES:
+		return l << r
+	case RANGLES:
+		return l >> r
 	case AND:
 		return l & r
 	case OR:
@@ -133,7 +137,7 @@ func (b *BinExpr) Evaluate(s *AssemblyState) uint32 {
 	case XOR:
 		return l ^ r
 	default:
-		panic(fmt.Sprintf("unknown binary operation"))
+		panic(fmt.Sprintf("unknown binary operation: %d", b.operator))
 	}
 }
 
@@ -295,6 +299,7 @@ func (m *MacroDef) Assemble(s *AssemblyState) {
 type MacroUse struct {
 	macro string
 	args  []string
+	loc   *psec.Loc
 }
 
 func (m *MacroUse) Assemble(s *AssemblyState) {
@@ -306,9 +311,11 @@ func (m *MacroUse) Assemble(s *AssemblyState) {
 	parsed, err := currentDriver.ParseString("macro", text)
 	if err != nil {
 		// TODO Errors from Assemble? Probably wise.
-		panic(fmt.Sprintf("failed to parse macro result: %v", err))
+		AsmError(m.loc, "Macro parse failed: %s\n", text)
+		os.Exit(1)
 	}
 
+	collectLabels(parsed, s)
 	for _, asm := range parsed.Lines {
 		asm.Assemble(s)
 	}

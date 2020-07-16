@@ -41,10 +41,32 @@ func ws() psec.Parser {
 	return psec.Symbol("ws")
 }
 
+// Returns true if this
+func reservedWords(s string) bool {
+	lc := strings.ToLower(s)
+	if len(s) == 1 {
+		for _, b := range "abcxyzij" {
+			if lc[0] == byte(b) {
+				return true
+			}
+		}
+	}
+
+	for _, res := range keywords {
+		if lc == res {
+			return true
+		}
+	}
+	return false
+}
+
+var keywords = []string{"push", "pop", "peek", "pick", "pc", "ex", "sp"}
+
 func buildDcpuParser() *psec.Grammar {
 	g := psec.NewGrammar()
 	core.AddBasicParsers(g) // Adds ws, identifiers, etc.
 
+	core.ReservedWords = reservedWords
 	addArgParsers(g)
 	addBinaryOpParsers(g)
 	addUnaryOpParsers(g)
@@ -143,9 +165,8 @@ func addArgParsers(g *psec.Grammar) {
 		})
 
 	g.AddSymbol("arg", psec.Alt(
-		sym("reg"), sym("[reg]"), sym("[reg+index]"),
-		sym("specialArgs"), sym("pick"),
-		sym("[lit]"), sym("lit arg")))
+		sym("lit arg"), sym("pick"), sym("specialArgs"), sym("[lit]"),
+		sym("reg"), sym("[reg]"), sym("[reg+index]")))
 }
 
 var binaryOpcodes = map[string]uint16{

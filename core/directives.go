@@ -18,6 +18,13 @@ func addDirectiveParsers(g *psec.Grammar) {
 			rs := r.([]interface{})
 			return &FillBlock{Value: rs[2].(Expression), Length: rs[6].(Expression)}, nil
 		})
+	g.WithAction("dir:reserve",
+		psec.SeqAt(2, litIC("reserve"), sym("ws1"), sym("expr")),
+		func(r interface{}, loc *psec.Loc) (interface{}, error) {
+			// Just the length
+			return &FillBlock{Value: &Constant{Value: 0}, Length: r.(Expression)}, nil
+		})
+
 	g.WithAction("dir:include",
 		psec.SeqAt(2, litIC("include"), sym("ws1"), sym("string")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
@@ -26,7 +33,7 @@ func addDirectiveParsers(g *psec.Grammar) {
 		})
 	g.WithAction("dir:symbol",
 		psec.Seq(psec.Alt(litIC("symbol"), litIC("sym"), litIC("equ"),
-			litIC("set"), litIC("def"), litIC("define")),
+			litIC("set"), litIC("define"), litIC("def")),
 			sym("ws1"), sym("identifier"), ws(), lit(","), ws(), sym("expr")),
 		func(r interface{}, loc *psec.Loc) (interface{}, error) {
 			rs := r.([]interface{})
@@ -62,6 +69,6 @@ func addDirectiveParsers(g *psec.Grammar) {
 
 	g.AddSymbol("directive",
 		psec.SeqAt(1, psec.Literal("."),
-			psec.Alt(sym("dir:fill"), sym("dir:include"), sym("dir:macro"),
-				sym("dir:org"), sym("dir:dat"), sym("dir:symbol"))))
+			psec.Alt(sym("dir:fill"), sym("dir:reserve"), sym("dir:include"),
+				sym("dir:macro"), sym("dir:org"), sym("dir:dat"), sym("dir:symbol"))))
 }

@@ -1,6 +1,8 @@
 package mocha
 
 import (
+	"fmt"
+
 	"github.com/shepheb/drasm/core"
 )
 
@@ -177,8 +179,14 @@ func (r *immediate) Encode(s *core.AssemblyState) *operandBits {
 		return &operandBits{mode: 6, regField: 6}
 	} else if value == 1 {
 		return &operandBits{mode: 6, regField: 7}
-	} else if core.Fits16(value) || core.Fits16Signed(value) {
+	} else if core.Fits16(value) {
 		bits.extraWords = []uint16{core.LowWord(value)}
+	} else if core.Fits16Signed(value) && !r.indirect {
+		return &operandBits{
+			mode:       7,
+			regField:   7,
+			extraWords: []uint16{core.LowWord(value)},
+		}
 	} else {
 		bits.extraWords = []uint16{core.HighWord(value), core.LowWord(value)}
 		bits.regField++ // The longword versions are one higher.
@@ -381,13 +389,24 @@ func (b *binaryLong) Assemble(s *core.AssemblyState) {
 		target := b.branch.Evaluate(s)
 		base := s.Index() + 1 // Just after this word, ie. where PC will point.
 		delta := int32(target) - int32(base)
+		fmt.Printf("binary branch %08x to %08x target: %d\n", base, target, delta)
 
 		// The space is 11 bits signed, so make sure it'll fit.
 		// That's -1024 to 1023
+		// NB: Forward references are on the first pass get evaluated to 0, so we
+		// sometimes fail to assemble them here. We hack around that by
+		// special-casing a target of 0 and flagging the state as dirty.
 		if delta < -1024 || delta > 1023 {
-			core.AsmError(b.branch.Location(), "Branch target is too far away (-1024 to 1023), need %d", delta)
+			if target == 0 {
+				delta = 0
+				s.MarkDirty()
+			} else {
+				core.AsmError(b.branch.Location(), "Branch target is too far away (-1024 to 1023), need %d", delta)
+			}
 		}
 		nextWord |= uint16(delta << 5)
+	} else if 0x10 <= b.opcode && b.opcode <= 0x17 { // Branches, but no branch target
+		nextWord |= 0xffe0 // Set all the upper bits, signaling it's a skipping IFx.
 	}
 	s.Push(nextWord)
 	srcBits.assembleExtras(s)
@@ -437,6 +456,9 @@ var unaryOpcodes = map[string]uint16{
 	"int": 12,
 	"iaq": 13,
 	"ext": 14,
+	"clr": 15,
+	"psh": 16,
+	"pop": 17,
 	// Branches
 	"bzr":  0x20,
 	"bnz":  0x21,

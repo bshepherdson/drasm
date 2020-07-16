@@ -140,6 +140,12 @@ func TestImmediates(t *testing.T) {
 	// And the special cases for 0 and 1.
 	expectAM(t, "1", &operandBits{mode: 6, regField: 7})
 	expectAM(t, "0", &operandBits{mode: 6, regField: 6})
+
+	// And finally, the register lists.
+	expectAM(t, "{a, z, b, C, EX}",
+		&immediate{value: constAt(0x127, 0), indirect: false})
+	expectAM(t, "{pc, y, x}",
+		&immediate{value: constAt(0x218, 0), indirect: false})
 }
 
 func expectOp(t *testing.T, rule, input string, expected []uint16) {
@@ -193,6 +199,7 @@ func TestBinaryLongInstructions(t *testing.T) {
 func TestUnaryOps(t *testing.T) {
 	expectOp(t, "unary instruction", "negw b", []uint16{0x0101})
 	expectOp(t, "unary instruction", "logl [pc, c]", []uint16{0x81bd, 2})
+	expectOp(t, "unary instruction", "peal [pc, c]", []uint16{0x80bd, 2})
 	expectOp(t, "unary instruction", "peal [pc, c]", []uint16{0x80bd, 2})
 	expectError(t, "unary instruction", "peal c")
 }
