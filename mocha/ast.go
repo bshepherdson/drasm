@@ -173,7 +173,7 @@ type immediate struct {
 }
 
 func (r *immediate) Encode(s *core.AssemblyState) *operandBits {
-	bits := &operandBits{mode: 7, regField: 0}
+	bits := &operandBits{mode: 7, regField: 0} // [lit_w] by default
 	value := r.value.Evaluate(s)
 	if value == 0 {
 		return &operandBits{mode: 6, regField: 6}
@@ -184,12 +184,12 @@ func (r *immediate) Encode(s *core.AssemblyState) *operandBits {
 	} else if core.Fits16Signed(value) && !r.indirect {
 		return &operandBits{
 			mode:       7,
-			regField:   7,
+			regField:   4,
 			extraWords: []uint16{core.LowWord(value)},
 		}
-	} else {
+	} else { // Long word required
 		bits.extraWords = []uint16{core.HighWord(value), core.LowWord(value)}
-		bits.regField++ // The longword versions are one higher.
+		bits.regField++ // The longwords are one higher than the unsigned words.
 	}
 
 	if !r.indirect {
@@ -217,7 +217,7 @@ type pcRel struct {
 }
 
 func (r *pcRel) Encode(s *core.AssemblyState) *operandBits {
-	bits := &operandBits{mode: 7, regField: 4}
+	bits := &operandBits{mode: 7, regField: 5}
 	if r.offset != nil {
 		value := r.offset.Evaluate(s)
 		if !core.Fits16Signed(value) {
@@ -229,7 +229,7 @@ func (r *pcRel) Encode(s *core.AssemblyState) *operandBits {
 	} else {
 		// Relative index, but the register number in the next word.
 		bits.extraWords = []uint16{r.reg}
-		bits.regField = 5
+		bits.regField = 6
 	}
 	return bits
 }
@@ -264,7 +264,7 @@ func (r *spRel) Encode(s *core.AssemblyState) *operandBits {
 	if !core.Fits16Signed(value) {
 		core.AsmError(r.offset.Location(), "SP-relative offset does not fit in 16-bit value: %d", value)
 	}
-	return &operandBits{mode: 7, regField: 6, extraWords: []uint16{core.LowWord(value)}}
+	return &operandBits{mode: 7, regField: 7, extraWords: []uint16{core.LowWord(value)}}
 }
 
 func (r *spRel) HasEffectiveAddress() bool {
